@@ -36,7 +36,8 @@
     "build": "tsc",
     "test": "vitest run",
     "lint": "oxlint",
-    "version:check": "node scripts/version-check.js"
+    "version:check": "node scripts/version-check.js",
+    "postversion": "node scripts/sync-version.js && git add openclaw.plugin.json && git commit --amend --no-edit"
   },
   "publishConfig": {
     "access": "public",
