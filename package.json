@@ -12,7 +12,13 @@
     "url": "https://github.com/8kugames/Cyber-Jianghu-Openclaw/issues"
   },
   "homepage": "https://github.com/8kugames/Cyber-Jianghu-Openclaw#readme",
-  "keywords": ["openclaw", "cyber-jianghu", "agent", "mmo", "game"],
+  "keywords": [
+    "openclaw",
+    "cyber-jianghu",
+    "agent",
+    "mmo",
+    "game"
+  ],
   "type": "module",
   "files": [
     "SKILL.md",
@@ -26,15 +32,18 @@
     "openclaw.plugin.json"
   ],
   "openclaw": {
-    "extensions": ["./register.ts"],
-    "hooks": ["./hooks/cyber-jianghu-openclaw-bootstrap"]
+    "extensions": [
+      "./register.ts"
+    ],
+    "hooks": [
+      "./hooks/cyber-jianghu-openclaw-bootstrap"
+    ]
   },
   "peerDependencies": {
-    "openclaw": ">=1.0.0"
+    "openclaw": "^2026.3.13"
   },
   "scripts": {
     "build": "tsc",
-    "test": "vitest run",
     "lint": "oxlint",
     "version:check": "node scripts/version-check.js",
     "postversion": "node scripts/sync-version.js && git add openclaw.plugin.json && git commit --amend --no-edit"
