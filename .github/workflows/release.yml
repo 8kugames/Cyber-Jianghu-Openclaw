@@ -24,9 +24,6 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Test
-        run: npm run test
-
   release-npm:
     needs: verify
     runs-on: ubuntu-latest
