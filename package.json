@@ -1,0 +1,45 @@
+{
+  "name": "@8kugames/cyber-jianghu-openclaw",
+  "version": "0.0.1",
+  "description": "Cyber-Jianghu Agent - OpenClaw integration for MMO-MAS game",
+  "author": "8kugames",
+  "license": "MIT-0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/8kugames/Cyber-Jianghu-Openclaw.git"
+  },
+  "bugs": {
+    "url": "https://github.com/8kugames/Cyber-Jianghu-Openclaw/issues"
+  },
+  "homepage": "https://github.com/8kugames/Cyber-Jianghu-Openclaw#readme",
+  "keywords": ["openclaw", "cyber-jianghu", "agent", "mmo", "game"],
+  "type": "module",
+  "files": [
+    "SKILL.md",
+    "README.md",
+    "DEPLOYMENT.md",
+    "hooks/",
+    "tools/",
+    "plugins/",
+    "templates/",
+    "register.ts",
+    "openclaw.plugin.json"
+  ],
+  "openclaw": {
+    "extensions": ["./register.ts"],
+    "hooks": ["./hooks/cyber-jianghu-openclaw-bootstrap"]
+  },
+  "peerDependencies": {
+    "openclaw": ">=1.0.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "lint": "oxlint",
+    "version:check": "node scripts/version-check.js"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  }
+}

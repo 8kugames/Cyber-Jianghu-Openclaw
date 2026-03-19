@@ -1,0 +1,38 @@
+# Development-only files (excluded from ClawHub publish)
+
+# Build/config
+tsconfig.json
+tsconfig.*.json
+
+# CI/CD
+.github/
+
+# Build scripts
+scripts/
+
+# Node.js
+node_modules/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Test files
+**/*.test.ts
+**/*.spec.ts
+**/__tests__/
+coverage/
+
+# Development docs (keep README.md for ClawHub)
+DEPLOYMENT.md

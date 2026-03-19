@@ -1,0 +1,91 @@
+// ============================================================================
+// OpenClaw Agent Configuration: Player Agent Template (HTTP Mode)
+// ============================================================================
+//
+// This is a template configuration for a player agent using HTTP API mode.
+// Copy this file and customize it for your agent.
+//
+// Usage:
+//   cp templates/player-agent.json5 ~/.openclaw/agents/your-agent.json5
+//   # Edit the file and replace placeholders with actual values
+//
+// Architecture:
+//   OpenClaw Gateway (Brain) <--HTTP--> cyber-jianghu-agent (Body) <--WebSocket--> Game Server (World)
+//       Port: 23340-23349                   ws://host:23333/ws
+//
+// Tick-Driven Workflow:
+//   1. Game Server sends WorldState to Agent via WebSocket
+//   2. Agent updates HTTP API state (GET /api/v1/tick for polling)
+//   3. OpenClaw cron fires -> bootstrap hook checks for new tick
+//   4. If new tick: fetch CONTEXT.md, LLM decides, calls cyber_jianghu_act
+//   5. Agent submits Intent to Game Server before deadline
+// ============================================================================
+
+{
+  // Agent 基本信息
+  name: "{AGENT_NAME}",
+  description: "{AGENT_DESCRIPTION}",
+
+  // 工作区配置
+  agents: {
+    defaults: {
+      // 工作区路径（包含 SOUL.md, CONTEXT.md, memory/ 等）
+      workspace: "~/.openclaw/cyber-jianghu-openclaw-agents/{AGENT_NAME}",
+
+      // Cron 配置（Tick-Driven）
+      // bootstrap hook 会检测 tick_id 是否变化，避免重复决策
+      cron: [
+        {
+          // 游戏主循环 - 定期检查是否有新的 WorldState
+          // bootstrap hook 会检测 tick_id 是否变化
+          name: "game-tick-poll",
+          expression: "*/10 * * * * *",  // 每 10 秒执行
+          prompt: `检查并响应游戏状态。
+
+**CRITICAL**: 你必须调用 cyber_jianghu_act 工具来提交动作。没有例外。
+
+决策流程:
+1. 阅读 CONTEXT.md 了解当前状态
+2. 根据你的人设(SOUL.md)和当前情况思考
+3. 调用 cyber_jianghu_act 工具提交动作
+
+如果 CONTEXT.md 显示 tick 没有变化，可以跳过本次决策。`,
+          session: "main",
+          enabled: true
+        }
+      ],
+
+      // Heartbeat 配置（禁用 - 使用 Cron 代替）
+      heartbeat: {
+        every: "0m",
+        enabled: false
+      },
+
+      // 模型配置
+      model: "claude/claude-sonnet-4-20250514",  // 或其他模型
+
+      // 超时配置 - 从 API 获取 tick 剩余时间
+      // 建议：timeoutSeconds < seconds_until_next_tick
+      timeoutSeconds: 45
+    }
+  },
+
+  // Hook 配置 - 使用 bootstrap hook
+  hooks: {
+    "agent:bootstrap": "hooks/cyber-jianghu-openclaw-bootstrap"
+  },
+
+  // 工具配置 - cyber_jianghu_act 是必需的
+  tools: {
+    required: ["cyber_jianghu_act"],
+    // 允许基本工具
+    allow: ["cyber_jianghu_act", "read", "write"]
+  },
+
+  // 沙箱配置（多 Agent 场景建议启用）
+  sandbox: {
+    enabled: false,
+    workspaceRoot: "~/.openclaw/sandboxes",
+    privilegeMode: "restricted"
+  }
+}

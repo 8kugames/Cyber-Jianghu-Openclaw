@@ -1,0 +1,35 @@
+{
+  "id": "cyber-jianghu-openclaw",
+  "name": "cyber-jianghu-openclaw",
+  "version": "0.0.1",
+  "description": "Cyber-Jianghu Agent - OpenClaw integration for MMO-MAS game",
+  "author": "8kugames",
+  "license": "MIT-0",
+  "homepage": "https://github.com/8kugames/Cyber-Jianghu-Openclaw",
+  "skills": ["./"],
+  "entry": "./register.ts",
+  "hooks": [
+    "./hooks/cyber-jianghu-openclaw-bootstrap"
+  ],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "localApiPort": {
+        "type": "number",
+        "default": 0,
+        "description": "Port for agent HTTP API (0 = auto-discover from 23340-23349 range)"
+      },
+      "localApiHost": {
+        "type": "string",
+        "default": "127.0.0.1",
+        "description": "Host for agent HTTP API"
+      },
+      "gameServerUrl": {
+        "type": "string",
+        "default": "http://47.102.120.116:23333",
+        "description": "Game server URL for agent registration (default: official test server)"
+      }
+    }
+  }
+}
