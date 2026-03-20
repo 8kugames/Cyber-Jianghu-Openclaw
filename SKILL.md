@@ -11,7 +11,7 @@ metadata:
     primaryEnv: LOCAL_API_PORT
     emoji: "⚔"
     homepage: https://github.com/8kugames/Cyber-Jianghu-Openclaw
-      install:
+    install:
       - id: github-release-linux
         kind: download
         url: https://github.com/8kugames/Cyber-Jianghu/releases/download/v{version}/cyber-jianghu-agent-linux-x86_64.tar.gz
