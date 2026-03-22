@@ -155,7 +155,6 @@ export class WsClient {
 	private ws: WebSocket | null = null;
 	private reconnectAttempts: number = 0;
 	private shouldReconnect: boolean = true;
-	private messageHandlers: Map<string, Set<(msg: DownstreamMessage) => void>> = new Map();
 	private tickHandler: ((tick: TickMessage) => void) | null = null;
 	private tickClosedHandler: ((msg: TickClosedMessage) => void) | null = null;
 	private reviewHandler: ((msg: ReviewRequestMessage) => void) | null = null;
