@@ -3,10 +3,13 @@
 // This file is the main entry point for the Cyber-Jianghu OpenClaw plugin.
 // OpenClaw calls the register(api) function when the plugin is loaded.
 //
-// 架构说明：
-// - cyber_jianghu_act 工具在这里注册，执行时只记录意图
-// - agent_end hook 负责实际的验证、提交和执行
-// - 这样可以集中处理重试、验证和记忆归档逻辑
+// Architecture:
+//   OpenClaw (Brain) ←→ WebSocket ←→ Agent (Body) ←→ Game Server
+//
+// WebSocket Integration:
+// - Connect to Agent's WebSocket endpoint on load
+// - Receive tick updates (WorldState + deadline)
+// - Submit intents via WebSocket
 // ============================================================================
 
 /**
@@ -48,10 +51,25 @@ interface ToolResult {
 // Store the last cyber_jianghu_act call for the enforcement hook
 let lastGameActionCall: { action: string; target?: string; data?: string; reasoning?: string } | null = null;
 
+// Shared state for WebSocket tick data
+interface SharedTickState {
+	tickId: number;
+	deadlineMs: number;
+	agentId: string;
+	state: any;
+	context?: string;
+}
+
+let sharedTickState: SharedTickState | null = null;
+let wsClient: any = null;
+
 /**
  * Plugin entry point - called by OpenClaw when the plugin is loaded
  */
-export default function register(api: PluginAPI) {
+export default async function register(api: PluginAPI) {
+	// Initialize WebSocket connection to Agent
+	initWebSocket(api);
+
 	// Register cyber_jianghu_act tool
 	//
 	// 工具执行时只记录意图，实际的验证和提交由 agent_end hook 处理
@@ -231,22 +249,27 @@ export default function register(api: PluginAPI) {
 	// 这个 hook 在每次 agent 决策周期后运行
 	// 它确保 cyber_jianghu_act 被调用，并将意图提交到游戏服务器
 	api.on("agent_end", async (event, context) => {
-		// 从 HTTP API 获取当前 tick 状态
-		let tickId = 0;
-		let agentId = "unknown";
+		// 优先使用 WebSocket 共享的 tick 状态
+		let tickId = sharedTickState?.tickId || 0;
+		let agentId = sharedTickState?.agentId || "unknown";
 
-		try {
-			const { getHttpClientAsync } = await import("./tools/cyber_jianghu_act/http-client.js");
-			const client = await getHttpClientAsync(0);
-			const tickStatus = await client.get<{
-				tick_id: number;
-				agent_id: string;
-			}>("/api/v1/tick");
-			tickId = tickStatus.tick_id;
-			agentId = tickStatus.agent_id;
-			console.log(`[cyber-jianghu-openclaw] Current tick: ${tickId}, agent: ${agentId}`);
-		} catch (e) {
-			console.warn("[cyber-jianghu-openclaw] Failed to get tick status, using defaults:", e);
+		// 如果没有 WebSocket tick 状态，从 HTTP API 获取
+		if (tickId === 0) {
+			try {
+				const { getHttpClientAsync } = await import("./tools/cyber_jianghu_act/http-client.js");
+				const client = await getHttpClientAsync(0);
+				const tickStatus = await client.get<{
+					tick_id: number;
+					agent_id: string;
+				}>("/api/v1/tick");
+				tickId = tickStatus.tick_id;
+				agentId = tickStatus.agent_id;
+				console.log(`[cyber-jianghu-openclaw] Current tick: ${tickId}, agent: ${agentId}`);
+			} catch (e) {
+				console.warn("[cyber-jianghu-openclaw] Failed to get tick status, using defaults:", e);
+			}
+		} else {
+			console.log(`[cyber-jianghu-openclaw] Using tick from WebSocket: ${tickId}`);
 		}
 
 		// 将存储的工具调用传递给 enforcement handler
@@ -255,6 +278,7 @@ export default function register(api: PluginAPI) {
 			tickId,
 			agentId,
 			lastGameActionCall,
+			wsClient,
 		};
 
 		const { runEnforcement } = await import("./tools/cyber_jianghu_act/enforcement.js");
@@ -265,4 +289,52 @@ export default function register(api: PluginAPI) {
 	});
 
 	console.log("[cyber-jianghu-openclaw] Plugin registered successfully");
+}
+
+// Initialize WebSocket connection to Agent
+async function initWebSocket(api: PluginAPI): Promise<void> {
+	try {
+		const { getWsClientAsync } = await import("./tools/cyber_jianghu_act/ws-client.js");
+
+		console.log("[cyber-jianghu-openclaw] Connecting to Agent via WebSocket...");
+
+		const client = await getWsClientAsync(0);
+		wsClient = client;
+
+		// Handle tick messages
+		client.onTick((tick) => {
+			console.log(`[cyber-jianghu-openclaw] Tick ${tick.tick_id} received (deadline: ${tick.deadline_ms})`);
+			sharedTickState = {
+				tickId: tick.tick_id,
+				deadlineMs: tick.deadline_ms,
+				agentId: tick.state?.agent_id || "unknown",
+				state: tick.state,
+				context: tick.context,
+			};
+		});
+
+		// Handle tick closed messages
+		client.onTickClosed((msg) => {
+			console.log(`[cyber-jianghu-openclaw] Tick ${msg.tick_id} closed: ${msg.reason}`);
+		});
+
+		// Handle errors
+		client.onError((error) => {
+			console.error("[cyber-jianghu-openclaw] WebSocket error:", error.message);
+		});
+
+		// Handle disconnect
+		client.onDisconnect(() => {
+			console.log("[cyber-jianghu-openclaw] WebSocket disconnected");
+		});
+
+		// Handle connect
+		client.onConnect(() => {
+			console.log("[cyber-jianghu-openclaw] WebSocket connected to Agent");
+		});
+
+		await client.connect();
+	} catch (e) {
+		console.error("[cyber-jianghu-openclaw] Failed to connect to Agent:", e);
+	}
 }

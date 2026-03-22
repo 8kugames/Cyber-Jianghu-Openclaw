@@ -52,7 +52,10 @@ export async function discoverPort(
 	config?: Partial<HttpClientConfig>,
 ): Promise<number | null> {
 	const cfg = { ...DEFAULT_HTTP_CONFIG, ...config };
-	const targetHost = host || cfg.defaultHost;
+	// Use env var, provided host, or default
+	const targetHost = host ||
+		process.env.DOCKER_AGENT_HOST ||
+		"host.docker.internal";
 	const timeoutMs = cfg.discoveryTimeoutMs;
 
 	for (let port = cfg.portRange.min; port <= cfg.portRange.max; port++) {
