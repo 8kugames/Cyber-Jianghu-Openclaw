@@ -15,7 +15,7 @@
 // - 不硬编码游戏逻辑（如生存优先级）
 
 import { getHttpClientAsync } from "../../tools/cyber_jianghu_act/http-client.js";
-import type { AvailableAction } from "../../tools/cyber_jianghu_act/types.js";
+import type { AvailableAction, CognitiveContext, CognitiveContextResponse } from "../../tools/cyber_jianghu_act/types.js";
 
 /**
  * Hook event type (compatible with OpenClaw internal hooks)
@@ -69,8 +69,8 @@ let cachedAvailableActions: AvailableAction[] = [];
  * 不硬编码任何游戏逻辑
  */
 function generateDecisionHints(
-	availableActions: AvailableAction[],
-	secondsUntilNextTick?: number,
+    availableActions: AvailableAction[],
+    secondsUntilNextTick?: number,
 ): string {
 	// 动态生成动作列表
 	const actionList = availableActions.length > 0
@@ -98,6 +98,76 @@ ${actionList}
 
 ${timingHint}
 `;
+}
+
+/**
+ * Format the cognitive context into a Markdown CONTEXT.md document.
+ * This follows the four-stage structure:
+ *  - Stage 1: Perception (self_status, environment, key_observations)
+ *  - Stage 2: Motivation (active_drives with intensity, dominant_drive)
+ *  - Stage 3: Planning (current_goals, available_actions)
+  *  - Stage 4: Decision (thinking_prompt)
+ *
+ * @param cog The cognitive context payload from the cognitive endpoint
+ * @param tickId The current tick id to include in the header
+ */
+function formatCognitiveContext(
+  cog: CognitiveContext,
+  tickId: number,
+): string {
+  // Be defensive and support variations in the payload shape
+  const stage1 = (cog as any).stage1 ?? {};
+  const stage2 = (cog as any).stage2 ?? {};
+  const stage3 = (cog as any).stage3 ?? {};
+  const stage4 = (cog as any).stage4 ?? {};
+
+  // Perception
+  const self_status = stage1.self_status ?? (cog as any).self_status ?? "";
+  const environment = stage1.environment ?? (cog as any).environment ?? "";
+  const key_observations = (stage1.key_observations ?? (cog as any).key_observations ?? []) as any[];
+
+  // Motivation
+  const active_drives = (stage2.active_drives ?? (cog as any).active_drives ?? []) as any[];
+  const dominant_drive = stage2.dominant_drive ?? (cog as any).dominant_drive ?? "";
+
+  // Planning
+  const current_goals = (stage3.current_goals ?? (cog as any).current_goals ?? []) as any[];
+  const available_actions = (stage3.available_actions ?? (cog as any).available_actions ?? []) as AvailableAction[];
+
+  // Decision
+  const thinking_prompt = stage4.thinking_prompt ?? (cog as any).thinking_prompt ?? "";
+
+  const makeOrNull = (v: any) => (Array.isArray(v) ? v.map(String) : v ?? "");
+
+  const obsLines = (key_observations && key_observations.length > 0)
+    ? key_observations.map(o => `- ${o}`).join("\n")
+    : "- 无观察";
+
+  const drivesLines = active_drives && active_drives.length > 0
+    ? active_drives.map((d: any) => {
+        const drive = d.drive ?? d.name ?? String(d);
+        const intensity = d.intensity ?? d.level ?? 0;
+        const reason = d.reason ?? "";
+        return `- **${drive}** (强度: ${intensity}/10)${reason ? ` - ${reason}` : ""}`;
+      }).join("\n")
+    : "- 无驱动力";
+
+  const goalsLines = current_goals && current_goals.length > 0
+    ? current_goals.map((g: any) => `- ${g}`).join("\n")
+    : "- 无目标";
+
+  const actionsLines = available_actions && available_actions.length > 0
+    ? available_actions.map(a => `- \`${a.action}\` - ${a.description ?? ""}`).join("\n")
+    : "- 无可用动作";
+
+  // Assemble final Markdown
+  const header = `# 赛博江湖 - Tick ${tickId}\n`;
+  const sectionPerception = `## 第一阶段：感知\n\n### 自身状态\n${self_status}\n\n### 环境\n${environment}\n\n### 关键观察\n${obsLines}\n`;
+  const sectionMotivation = `## 第二阶段：动机\n\n### 当前驱动力\n${drivesLines}\n\n### 主导驱动力\n${dominant_drive}\n`;
+  const sectionPlanning = `## 第三阶段：规划\n\n### 当前目标\n${goalsLines}\n\n### 可用动作\n${actionsLines}\n`;
+  const sectionDecision = `## 第四阶段：决策\n\n${thinking_prompt}\n`;
+
+  return `${header}\n${sectionPerception}\n${sectionMotivation}\n${sectionPlanning}\n${sectionDecision}\n`;
 }
 
 /**
@@ -158,21 +228,16 @@ const handler = async (event: HookEvent): Promise<void> => {
 			`[bootstrap] New Tick detected: ${tickStatus.tick_id} (previous: ${previousTickId})`
 		);
 
-		// Get formatted context from agent HTTP API (GET /api/v1/context)
-		const response = await client.get<{
-			context: string;
-			tick_id: number;
-			agent_id: string;
-		}>("/api/v1/context");
+		// Get cognitive context from agent HTTP API (GET /api/v1/cognitive)
+		// This provides structured four-stage reasoning: Perception → Motivation → Planning → Decision
+		const cognitiveResponse = await client.get<CognitiveContextResponse>("/api/v1/cognitive");
 
-		// Get WorldState to extract available_actions
-		const worldState = await client.get<{
-			available_actions?: AvailableAction[];
-		}>("/api/v1/state");
+		// Extract available actions for decision hints
+		const availableActions = cognitiveResponse.cognitive_context.planning?.available_actions ?? cachedAvailableActions;
 
 		// Cache available actions for hints
-		if (worldState.available_actions) {
-			cachedAvailableActions = worldState.available_actions;
+		if (availableActions.length > 0) {
+			cachedAvailableActions = availableActions;
 		}
 
 		// Generate data-driven decision hints
@@ -181,7 +246,13 @@ const handler = async (event: HookEvent): Promise<void> => {
 			tickStatus.seconds_until_next_tick,
 		);
 
-		const contextMd = response.context + hints;
+		// Format cognitive context as Markdown with four stages
+		const cognitiveMd = formatCognitiveContext(
+			cognitiveResponse.cognitive_context,
+			tickStatus.tick_id
+		);
+
+		const contextMd = cognitiveMd + hints;
 
 		// Write to workspace using the workspace API
 		// Note: OpenClaw provides workspace.writeFile through context
@@ -193,7 +264,7 @@ const handler = async (event: HookEvent): Promise<void> => {
 		await workspace.writeFile("CONTEXT.md", contextMd);
 
 		console.log(
-			`[bootstrap] CONTEXT.md updated for tick ${response.tick_id}`
+			`[bootstrap] CONTEXT.md updated for tick ${tickStatus.tick_id}`
 		);
 
 		// Log timing info for debugging

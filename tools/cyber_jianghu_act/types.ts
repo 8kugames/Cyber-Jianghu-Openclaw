@@ -206,3 +206,107 @@ export const DEFAULT_RETRY_CONFIG: RetryConfig = {
 	maxDelayMs: 5000,
 	backoffMultiplier: 2,
 };
+
+// ============================================================================
+// Cognitive Context Types (四阶段认知上下文)
+// ============================================================================
+//
+// Matches Rust cognitive_context.rs for /api/v1/cognitive endpoint
+
+/**
+ * Cognitive Context Response from /api/v1/cognitive
+ * Matches Rust CognitiveContextResponse in handlers.rs
+ */
+export interface CognitiveContextResponse {
+	cognitive_context: CognitiveContext;
+	persona?: CognitivePersonaInfo;
+	world_state: SimplifiedWorldState;
+}
+
+/**
+ * Four-stage cognitive context
+ */
+export interface CognitiveContext {
+	perception: PerceptionContext;
+	motivation: MotivationContext;
+	planning: PlanningContext;
+	decision: DecisionContext;
+}
+
+/**
+ * Perception context (Stage 1)
+ */
+export interface PerceptionContext {
+	self_status: string;
+	environment: string;
+	key_observations: string[];
+}
+
+/**
+ * Motivation context (Stage 2)
+ */
+export interface MotivationContext {
+	active_drives: Drive[];
+	dominant_drive: string;
+}
+
+/**
+ * Drive - internal motivation
+ */
+export interface Drive {
+	drive: string;
+	intensity: number;
+	reason: string;
+}
+
+/**
+ * Planning context (Stage 3)
+ */
+export interface PlanningContext {
+	current_goals: string[];
+	available_actions: AvailableActionInfo[];
+}
+
+/**
+ * Available action info (matches Rust AvailableActionInfo)
+ */
+export interface AvailableActionInfo {
+	action: string;
+	target?: string;
+	description: string;
+}
+
+/**
+ * Decision context (Stage 4)
+ */
+export interface DecisionContext {
+	requires_reasoning: boolean;
+	thinking_prompt: string;
+}
+
+/**
+ * Persona info from cognitive endpoint
+ */
+export interface CognitivePersonaInfo {
+	name: string;
+	personality: string[];
+	description: string;
+}
+
+/**
+ * Simplified world state from cognitive endpoint
+ */
+export interface SimplifiedWorldState {
+	agent_id?: string;
+	attributes: Record<string, number>;
+	nearby_entities_count: number;
+	time: SimplifiedTime;
+}
+
+/**
+ * Simplified time from cognitive endpoint
+ */
+export interface SimplifiedTime {
+	hour: number;
+	weather: string;
+}

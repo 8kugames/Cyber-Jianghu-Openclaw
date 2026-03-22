@@ -106,6 +106,14 @@ export async function runEnforcement(
 	try {
 		const httpClient = await getHttpClientAsync(context.localApiPort || 0);
 
+		// Tick boundary validation - reject intents for expired ticks
+		const tickValid = await validateTickBoundary(httpClient, context.tickId || 0);
+		if (!tickValid.valid) {
+			console.warn(`[enforcement] Intent expired: tick ${context.tickId} < current ${tickValid.currentTick}. Skipping submission.`);
+			await archiveDecision(context, params, gameActionCalled, true);
+			return;
+		}
+
 		// 构建 context
 		const executeContext = {
 			httpClient,
@@ -127,6 +135,30 @@ export async function runEnforcement(
 		console.error("[enforcement] Failed to execute action:", error);
 		// 即使失败也尝试归档
 		await archiveDecision(context, params, gameActionCalled);
+	}
+}
+
+/**
+ * Validate tick boundary before submitting intent
+ *
+ * Returns true if the intent's tick is still valid (not expired)
+ */
+async function validateTickBoundary(
+	httpClient: Awaited<ReturnType<typeof getHttpClientAsync>>,
+	intentTickId: number,
+): Promise<{ valid: boolean; currentTick: number }> {
+	try {
+		const tickStatus = await httpClient.get<{
+			tick_id: number;
+		}>("/api/v1/tick");
+
+		return {
+			valid: intentTickId >= tickStatus.tick_id,
+			currentTick: tickStatus.tick_id,
+		};
+	} catch (error) {
+		console.warn("[enforcement] Failed to validate tick boundary:", error);
+		return { valid: true, currentTick: intentTickId };
 	}
 }
 
@@ -287,6 +319,7 @@ async function archiveDecision(
 	},
 	action: { action: string; target?: string; data?: string; reasoning?: string },
 	gameActionCalled: boolean,
+	expired: boolean = false,
 ): Promise<void> {
 	try {
 		const httpClient = await getHttpClientAsync(context.localApiPort || 0);
@@ -300,6 +333,7 @@ async function archiveDecision(
 			},
 			reasoning: action.reasoning || context.lastAssistantMessage,
 			jianghu_act_called: gameActionCalled,
+			expired,
 		};
 
 		// 使用配置的重要性计算（数据驱动）
@@ -316,6 +350,7 @@ async function archiveDecision(
 				type: "decision",
 				tick: decision.tick,
 				action: decision.action?.action,
+				expired,
 			},
 		});
 	} catch (error) {
