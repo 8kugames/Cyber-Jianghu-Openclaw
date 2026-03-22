@@ -80,6 +80,11 @@ export async function runEnforcement(
 			readFile?: (path: string) => Promise<string>;
 			[key: string]: unknown;
 		};
+		// WebSocket client for intent submission
+		wsClient?: {
+			sendIntent: (tickId: number, actionType: string, actionData?: unknown, thoughtLog?: string) => void;
+			isConnected: () => boolean;
+		};
 		[key: string]: unknown;
 	},
 ): Promise<void> {
@@ -114,7 +119,21 @@ export async function runEnforcement(
 			return;
 		}
 
-		// 构建 context
+		// 如果 WebSocket 可用且已连接，使用 WebSocket 提交 intent
+		if (context.wsClient && context.wsClient.isConnected()) {
+			console.log("[enforcement] Submitting intent via WebSocket");
+			context.wsClient.sendIntent(
+				context.tickId || 0,
+				params.action,
+				params.data ? { target: params.target, data: params.data } : undefined,
+				params.reasoning,
+			);
+			await archiveDecision(context, params, gameActionCalled);
+			return;
+		}
+
+		// 否则使用 HTTP
+		console.log("[enforcement] WebSocket not available, using HTTP");
 		const executeContext = {
 			httpClient,
 			agentId: context.agentId || "unknown",
