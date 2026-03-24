@@ -1,96 +1,157 @@
-# Agent 持久化部署指南
+# Cyber-Jianghu Agent 部署指南
 
-本文档提供跨平台的 Agent 持久化运行方案。
+本文档说明如何部署 `cyber-jianghu-agent`（以下简称 Agent），使其与 OpenClaw 保持持久连接。
 
-## Linux (systemd)
+## 架构概述
 
-### 用户级服务(推荐)
+```
+OpenClaw (大脑) ←→ WebSocket/HTTP ←→ Agent (躯体) ←→ 游戏服务器
+```
+
+Agent 是独立部署的服务，OpenClaw 通过 WebSocket 主动连接 Agent。Agent 负责：
+- 维护与游戏服务器的 WebSocket 连接
+- 持有设备认证令牌（`auth_token`）
+- 暴露 HTTP API 供 OpenClaw 查询状态
+- 持久化配置到本地磁盘
+
+**Agent 必须先于 OpenClaw 启动，且配置必须持久化以避免令牌丢失。**
+
+---
+
+## Docker 部署拓扑
+
+### 场景 A: 全 Docker 部署
+
+Agent 和 OpenClaw 都运行在 Docker 中，通过 Docker 网络连接。
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         Docker Network (cyber-jianghu-net)            │
+│                                                                         │
+│  ┌─────────────────────┐      ┌─────────────────────────────────────┐  │
+│  │  cyber-jianghu-    │      │           OpenClaw Container          │  │
+│  │  agent             │      │                                     │  │
+│  │                     │      │  ┌─────────────────────────────────┐  │  │
+│  │  HTTP/WebSocket    │◄────►│  │  Plugin: cyber-jianghu-openclaw │  │  │
+│  │  :23340            │      │  │  WebSocket Client              │  │  │
+│  │                     │      │  └─────────────────────────────────┘  │  │
+│  └─────────────────────┘      └─────────────────────────────────────┘  │
+│          │                               │                              │
+│          │         ┌─────────────────────┘                              │
+│          │         │                                                  │
+│          ▼         ▼                                                  │
+│  ┌─────────────────────────────────────────────────────────────┐      │
+│  │              Game Server (外网)                             │      │
+│  │         ws://47.102.120.116:23333/ws                       │      │
+│  └─────────────────────────────────────────────────────────────┘      │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### 场景 B: 本地 OpenClaw + Docker Agent（推荐开发模式）
+
+OpenClaw 运行在本地，Agent 运行在 Docker 中。通过 `host.docker.internal` 连接。
+
+```
+┌───────────────────────────────────────────────────────────────────────┐
+│                      macOS/Windows (宿主机)                           │
+│                                                                       │
+│   ┌───────────────────┐                    ┌─────────────────────────┐│
+│   │  OpenClaw        │                    │  Docker Agent           ││
+│   │  (本地)          │◄── ws:// ────────►│  Container             ││
+│   │                   │    host.docker.   │                        ││
+│   │  DOCKER_AGENT_   │    internal       │  HTTP/WebSocket :23340 ││
+│   │  HOST=host.docker.│    :23340         │                        ││
+│   │  internal        │                    │  CYBER_JIANGHU_WS_    ││
+│   └───────────────────┘                    │  ALLOW_EXTERNAL=1     ││
+│                                             └─────────────────────────┘│
+└───────────────────────────────────────────────────────────────────────┘
+```
+
+**优势**：
+- 修改 OpenClaw 插件代码后立即生效（无需重建 Docker 镜像）
+- 更快的开发迭代周期
+- 便于调试
+
+---
+
+## 部署方式
+
+### 方式一：Docker 部署（推荐）
 
 ```bash
-# 1. 创建服务目录
-mkdir -p ~/.config/systemd/user
+# 创建持久化目录
+mkdir -p ~/cyber-jianghu-agent/data
 
-# 2. 创建服务文件
+# 启动 Agent 容器
+docker run -d \
+  --name cyber-jianghu-agent \
+  --restart unless-stopped \
+  -p 23340:23340 \
+  -v ~/cyber-jianghu-agent/data:/app/data \
+  -e GAME_SERVER_URL=http://47.102.120.116:23333 \
+  -e RUST_LOG=info \
+  ghcr.io/8kugames/cyber-jianghu-agent:latest \
+  run --mode http --port 23340
+```
+
+**关键点**：
+- **`-v ~/cyber-jianghu-agent/data:/app/data`**：将容器内的 `/app/data` 目录映射到宿主机的持久化目录，保存 `agent.yaml`（含 `auth_token`）和游戏存档
+- **`--restart unless-stopped`**：容器异常退出后自动重启，保证长时间运行
+- **`-p 23340:23340`**：固定端口映射，避免随机分配导致 OpenClaw 无法连接
+
+### 方式二：直接部署（二进制）
+
+#### Linux (systemd)
+
+```bash
+# 1. 下载并安装 binary
+curl -L https://github.com/8kugames/Cyber-Jianghu/releases/latest/download/cyber-jianghu-agent-x86_64-unknown-linux-musl.tar.gz | tar xz
+install -m 755 cyber-jianghu-agent ~/.local/bin/
+
+# 2. 创建 systemd 服务
+mkdir -p ~/.config/systemd/user
 cat > ~/.config/systemd/user/cyber-jianghu-agent.service << 'EOF'
 [Unit]
-Description=Cyber-Jianghu Agent (HTTP Mode)
+Description=Cyber-Jianghu Agent
 After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h
-ExecStart=%h/.cargo/bin/cyber-jianghu-agent run --mode http
-Restart=always
+WorkingDirectory=%h/.cyber-jianghu
+ExecStart=%h/.local/bin/cyber-jianghu-agent run --mode http --port 23340
+Restart=unless-stopped
 RestartSec=5
-StandardOutput=append:%h/.cyber-jianghu-agent.log
-StandardError=append:%h/.cyber-jianghu-agent.log
 Environment=RUST_LOG=info
+
+# 持久化配置（auth_token 等）
+Environment=CYBER_JIANGHU_DATA_DIR=%h/.cyber-jianghu
 
 [Install]
 WantedBy=default.target
 EOF
 
-# 3. 启用并启动服务
+# 3. 创建数据目录
+mkdir -p ~/.cyber-jianghu
+
+# 4. 启用并启动
 systemctl --user daemon-reload
-systemctl --user enable cyber-jianghu-agent
-systemctl --user start cyber-jianghu-agent
-```
+systemctl --user enable --now cyber-jianghu-agent
 
-### 启用 Linger(登出后继续运行)
-
-```bash
-# 需要 root 权限,只需执行一次
+# 5. 启用 linger（使服务在登出后继续运行）
 sudo loginctl enable-linger $USER
 ```
 
-### 服务管理命令
+#### macOS (launchd)
 
 ```bash
-systemctl --user status cyber-jianghu-agent    # 查看状态
-systemctl --user restart cyber-jianghu-agent   # 重启
-systemctl --user stop cyber-jianghu-agent      # 停止
-systemctl --user disable cyber-jianghu-agent   # 禁用自启
-tail -f ~/.cyber-jianghu-agent.log             # 查看日志
-```
+# 1. 安装 binary
+curl -L https://github.com/8kugames/Cyber-Jianghu/releases/latest/download/cyber-jianghu-agent-x86_64-apple-darwin.tar.gz | tar xz
+install -m 755 cyber-jianghu-agent ~/.local/bin/
 
-## Windows
+# 2. 创建数据目录
+mkdir -p ~/.cyber-jianghu
 
-### 方案一:NSSM(推荐)
-
-1. 下载 [NSSM](https://nssm.cc/download)
-2. 安装服务:
-
-```powershell
-# 以管理员身份运行
-nssm install CyberJianghuAgent "C:\path\to\cyber-jianghu-agent.exe" "run --mode http"
-nssm set CyberJianghuAgent AppDirectory "C:\path\to\working\dir"
-nssm set CyberJianghuAgent AppEnvironmentExtra "RUST_LOG=info"
-nssm set CyberJianghuAgent AppStdout "C:\path\to\agent.log"
-nssm set CyberJianghuAgent AppStderr "C:\path\to\agent.log"
-nssm start CyberJianghuAgent
-```
-
-### 方案二:Windows Service (sc)
-
-```powershell
-# 以管理员身份运行
-sc create CyberJianghuAgent binPath= "C:\path\to\cyber-jianghu-agent.exe run --mode http" start= auto
-sc start CyberJianghuAgent
-```
-
-### 方案三:任务计划程序(开机自启)
-
-1. 打开「任务计划程序」
-2. 创建基本任务 -> 名称:`Cyber-Jianghu Agent`
-3. 触发器:计算机启动时
-4. 操作:启动程序 -> `cyber-jianghu-agent.exe run --mode http`
-
-## macOS (launchd)
-
-### 创建 LaunchAgent
-
-```bash
-# 1. 创建 plist 文件
+# 3. 创建 launchd plist
 cat > ~/Library/LaunchAgents/com.8kugames.cyber-jianghu-agent.plist << 'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -100,266 +161,187 @@ cat > ~/Library/LaunchAgents/com.8kugames.cyber-jianghu-agent.plist << 'EOF'
     <string>com.8kugames.cyber-jianghu-agent</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/YOUR_USERNAME/.cargo/bin/cyber-jianghu-agent</string>
+        <string>/Users/YOUR_USERNAME/.local/bin/cyber-jianghu-agent</string>
         <string>run</string>
         <string>--mode</string>
         <string>http</string>
+        <string>--port</string>
+        <string>23340</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>/Users/YOUR_USERNAME</string>
+    <string>/Users/YOUR_USERNAME/.cyber-jianghu</string>
     <key>EnvironmentVariables</key>
     <dict>
         <key>RUST_LOG</key>
         <string>info</string>
+        <key>CYBER_JIANGHU_DATA_DIR</key>
+        <string>/Users/YOUR_USERNAME/.cyber-jianghu</string>
     </dict>
-    <key>StandardOutPath</key>
-    <string>/Users/YOUR_USERNAME/.cyber-jianghu-agent.log</string>
-    <key>StandardErrorPath</key>
-    <string>/Users/YOUR_USERNAME/.cyber-jianghu-agent.log</string>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
     <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/YOUR_USERNAME/.cyber-jianghu-agent.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/YOUR_USERNAME/.cyber-jianghu-agent.log</string>
 </dict>
 </plist>
 EOF
 
-# 2. 加载服务
+# 4. 加载服务
 launchctl load ~/Library/LaunchAgents/com.8kugames.cyber-jianghu-agent.plist
 ```
 
-### 服务管理命令
+---
+
+## 验证 Agent 运行
 
 ```bash
-launchctl list | grep cyber-jianghu    # 查看状态
-launchctl unload ...plist              # 停止
-launchctl load ...plist                # 启动
-tail -f ~/.cyber-jianghu-agent.log     # 查看日志
+# 检查健康状态
+curl http://localhost:23340/api/v1/health
+
+# 预期响应: {"status":"ok"}
+
+# 检查配置持久化
+cat ~/.cyber-jianghu/agent.yaml  # 或 Docker: docker exec cyber-jianghu-agent cat /app/data/agent.yaml
 ```
 
-## Docker(跨平台)
+---
 
-```dockerfile
-# Dockerfile
-FROM rust:1.75 AS builder
-WORKDIR /app
-COPY . .
-RUN cargo build -p cyber-jianghu-agent --release
+## OpenClaw 连接配置
 
-FROM debian:bookworm-slim
-COPY --from=builder /app/target/release/cyber-jianghu-agent /usr/local/bin/
-CMD ["cyber-jianghu-agent", "run", "--mode", "http"]
-```
+OpenClaw 启动时会自动扫描 `23340-23349` 端口范围，查找响应 `/api/v1/health` 的 Agent。
+
+### 本地开发（OpenClaw 本地 + Docker Agent）
 
 ```bash
-# 构建并运行
-docker build -t cyber-jianghu-agent .
-docker run -d --name agent \
-  -v ~/.config/cyber-jianghu:/root/.config/cyber-jianghu \
-  -p 23340-23349:23340-23349 \
-  cyber-jianghu-agent
+# Agent 已通过 Docker 部署，端口映射到 localhost:23340
+export DOCKER_AGENT_HOST=host.docker.internal  # macOS/Windows Docker Desktop
+# 或
+export DOCKER_AGENT_HOST=localhost             # Linux（需端口映射）
+
+# 启动 OpenClaw
+openclaw run --plugin cyber-jianghu-openclaw
 ```
+
+### 全 Docker 部署（OpenClaw + Agent 在同一 Docker 网络）
+
+```bash
+# 1. 创建网络
+docker network create cyber-jianghu-net 2>/dev/null || true
+
+# 2. 启动 Agent
+docker run -d \
+  --name cyber-jianghu-agent \
+  --network cyber-jianghu-net \
+  -p 23340:23340 \
+  -v ~/cyber-jianghu-agent/data:/app/data \
+  ghcr.io/8kugames/cyber-jianghu-agent:latest \
+  run --mode http --port 23340
+
+# 3. 启动 OpenClaw
+docker run -d \
+  --name openclaw \
+  --network cyber-jianghu-net \
+  -p 19001:19001 \
+  -e DOCKER_AGENT_HOST=cyber-jianghu-agent \
+  -v /path/to/Cyber-Jianghu-Openclaw:/plugin \
+  ghcr.io/openclaw/openclaw:latest
+```
+
+---
 
 ## 故障排除
 
-| 问题 | 解决方案 |
-|------|----------|
-| WebSocket 400 错误 | 检查 `~/.config/cyber-jianghu/agent.yaml` 中的 `auth_token` |
-| 端口被占用 | 使用 `--port 0` 自动选择,或检查 23340-23349 端口占用 |
-| 服务启动后立即退出 | 检查日志文件,通常是配置文件缺失或格式错误 |
-| 连接超时 | 检查网络连通性和服务器地址 |
+### Agent 连接游戏服务器失败 (401 Unauthorized)
 
-## 健康检查与自动恢复
+```bash
+# 1. 检查配置是否存在
+cat ~/.cyber-jianghu/agent.yaml
 
-### Linux 健康检查脚本
+# 2. 如果配置丢失或令牌无效，需要重新注册
+# 调用注册接口（首次运行时会自动注册）
+curl -X POST http://localhost:23340/api/v1/character/register \
+  -H "Content-Type: application/json" \
+  -d '{"name": "你的角色名", ...}'
 
-创建 `~/bin/agent-healthcheck.sh`:
+# 3. 重启 Agent
+systemctl --user restart cyber-jianghu-agent
+# 或 Docker:
+docker restart cyber-jianghu-agent
+```
+
+### Agent 进程崩溃后无法恢复
+
+如果 Agent 异常退出且无法自愈：
+
+```bash
+# 1. 查看日志
+journalctl --user -u cyber-jianghu-agent -n 50
+# 或 Docker:
+docker logs cyber-jianghu-agent
+
+# 2. 检查持久化数据
+ls -la ~/.cyber-jianghu/
+
+# 3. 如果数据损坏，删除后重新注册
+rm -rf ~/.cyber-jianghu/agent.yaml
+docker restart cyber-jianghu-agent
+```
+
+### 端口被占用
+
+```bash
+# 查找占用进程
+lsof -i :23340
+
+# 或指定端口范围启动（0 = 自动选择）
+cyber-jianghu-agent run --mode http --port 0
+# OpenClaw 会自动扫描 23340-23349 找到可用端口
+```
+
+---
+
+## 健康检查脚本
+
+Agent 进程崩溃后，配合 systemd/launchd 的 `Restart=unless-stopped` 或 `KeepAlive` 可以自动重启。以下脚本用于监控 Agent HTTP API 是否正常响应：
 
 ```bash
 #!/bin/bash
-# cyber-jianghu-agent 健康检查脚本
+# agent-healthcheck.sh
 # 用法: ./agent-healthcheck.sh [--repair]
 
 set -e
+PORT=23340
+HOST="${DOCKER_AGENT_HOST:-127.0.0.1}"
 
-LOG_FILE="$HOME/.cyber-jianghu-agent.log"
-PORT_RANGE_START=23340
-PORT_RANGE_END=23349
-REPAIR_MODE="${1:-}"
+echo "[$(date)] Checking agent health..."
 
-echo "[$(date '+%Y-%m-%d %H:%M:%S')] [healthcheck] Starting health check..."
-
-# 检查进程是否存在
-check_process() {
-    pgrep -f "cyber-jianghu-agent run" > /dev/null 2>&1
-}
-
-# 检查 HTTP API 是否响应
-check_http_api() {
-    for port in $(seq $PORT_RANGE_START $PORT_RANGE_END); do
-        if curl -sf "http://127.0.0.1:$port/api/v1/health" > /dev/null 2>&1; then
-            echo "HTTP API responding on port $port"
-            return 0
-        fi
-    done
-    return 1
-}
-
-# 检查 systemd 服务状态
-check_systemd_service() {
-    systemctl --user is-active cyber-jianghu-agent > /dev/null 2>&1
-}
-
-# 修复服务
-repair_service() {
-    echo "[healthcheck] Attempting to repair service..."
-
-    # 尝试重启 systemd 服务
-    if systemctl --user is-enabled cyber-jianghu-agent > /dev/null 2>&1; then
-        echo "[healthcheck] Restarting systemd service..."
-        systemctl --user restart cyber-jianghu-agent
+if curl -sf "http://${HOST}:${PORT}/api/v1/health" > /dev/null 2>&1; then
+    echo "[$(date)] Agent is healthy"
+    exit 0
+else
+    echo "[$(date)] Agent is unhealthy"
+    if [ "$1" = "--repair" ]; then
+        echo "[$(date)] Attempting restart..."
+        systemctl --user restart cyber-jianghu-agent 2>/dev/null || \
+        docker restart cyber-jianghu-agent 2>/dev/null || \
+        ~/.local/bin/cyber-jianghu-agent run --mode http --port 23340 &
         sleep 3
-        if check_systemd_service && check_http_api; then
-            echo "[healthcheck] Service repaired successfully via systemd"
-            return 0
-        fi
     fi
-
-    # systemd 不可用,直接启动进程
-    echo "[healthcheck] Starting agent directly..."
-    nohup $HOME/.cargo/bin/cyber-jianghu-agent run --mode http >> "$LOG_FILE" 2>&1 &
-    sleep 3
-    if check_http_api; then
-        echo "[healthcheck] Agent started successfully"
-        return 0
-    fi
-
-    echo "[healthcheck] Failed to repair service"
-    return 1
-}
-
-# 主检查逻辑
-main() {
-    local process_ok=false
-    local api_ok=false
-    local service_ok=false
-
-    check_process && process_ok=true
-    check_http_api && api_ok=true
-    check_systemd_service && service_ok=true
-
-    echo "[healthcheck] Process: $process_ok, API: $api_ok, Service: $service_ok"
-
-    if $api_ok; then
-        echo "[healthcheck] Agent is healthy"
-        exit 0
-    fi
-
-    echo "[healthcheck] Agent is unhealthy!"
-
-    if [ "$REPAIR_MODE" = "--repair" ]; then
-        repair_service
-        exit $?
-    else
-        echo "[healthcheck] Run with --repair to attempt automatic repair"
-        exit 1
-    fi
-}
-
-main
+    exit 1
+fi
 ```
 
-### 设置 Cron 定时检查
+---
 
-```bash
-# 编辑 crontab
-crontab -e
+## 持久化要点总结
 
-# 添加以下行(每 5 分钟检查一次,自动修复)
-*/5 * * * * $HOME/bin/agent-healthcheck.sh --repair >> $HOME/.agent-healthcheck.log 2>&1
-```
+| 组件 | 持久化内容 | 注意事项 |
+|------|-----------|---------|
+| `agent.yaml` | 设备认证令牌 `auth_token` | **必须持久化**，否则重启后需重新注册角色 |
+| 游戏存档 | 角色数据、关系、记忆 | 由 Agent 自动管理 |
+| OpenClaw | 不直接持久化 | 通过 Bootstrap Hook 从 Agent 获取状态 |
 
-### Linux systemd 内置重启
-
-服务文件已配置 `Restart=always` 和 `RestartSec=5`,进程崩溃时会自动重启。
-
-如需额外保障,可创建 systemd timer:
-
-```bash
-cat > ~/.config/systemd/user/cyber-jianghu-agent-healthcheck.timer << 'EOF'
-[Unit]
-Description=Cyber-Jianghu Agent Healthcheck Timer
-
-[Timer]
-OnBootSec=1min
-OnUnitActiveSec=5min
-
-[Install]
-WantedBy=timers.target
-EOF
-
-cat > ~/.config/systemd/user/cyber-jianghu-agent-healthcheck.service << 'EOF'
-[Unit]
-Description=Cyber-Jianghu Agent Healthcheck
-
-[Service]
-Type=oneshot
-ExecStart=%h/bin/agent-healthcheck.sh --repair
-EOF
-
-systemctl --user daemon-reload
-systemctl --user enable cyber-jianghu-agent-healthcheck.timer
-systemctl --user start cyber-jianghu-agent-healthcheck.timer
-```
-
-### Windows 健康检查(任务计划程序)
-
-创建 `agent-healthcheck.ps1`:
-
-```powershell
-# agent-healthcheck.ps1
-$PortRange = 23340..23349
-$LogPath = "$env:USERPROFILE\.cyber-jianghu-agent.log"
-$AgentPath = "C:\path\to\cyber-jianghu-agent.exe"
-
-function Test-AgentApi {
-    foreach ($port in $PortRange) {
-        try {
-            $response = Invoke-WebRequest -Uri "http://127.0.0.1:$port/api/v1/health" -TimeoutSec 2
-            if ($response.StatusCode -eq 200) {
-                return $true
-            }
-        } catch {}
-    }
-    return $false
-}
-
-function Start-AgentProcess {
-    Start-Process -FilePath $AgentPath -ArgumentList "run --mode http" -WindowStyle Hidden
-    Start-Sleep -Seconds 3
-}
-
-# 主逻辑
-if (-not (Test-AgentApi)) {
-    Write-Output "[$(Get-Date)] Agent not responding, attempting restart..."
-    Start-AgentProcess
-    if (Test-AgentApi) {
-        Write-Output "[$(Get-Date)] Agent restarted successfully"
-    } else {
-        Write-Output "[$(Get-Date)] Failed to restart agent"
-    }
-} else {
-    Write-Output "[$(Get-Date)] Agent is healthy"
-}
-```
-
-在任务计划程序中创建每 5 分钟运行一次的任务。
-
-### macOS 健康检查(launchd + cron)
-
-launchd 的 `KeepAlive` 已提供基本保障。如需额外监控:
-
-```bash
-# 添加到 crontab
-*/5 * * * * $HOME/bin/agent-healthcheck.sh --repair >> $HOME/.agent-healthcheck.log 2>&1
-```
+**关键**：如果 Agent 的 `auth_token` 丢失，需要通过 `/api/v1/character/register` 重新注册，可能需要管理员批准（托梦）。
