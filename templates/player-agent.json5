@@ -1,8 +1,8 @@
 // ============================================================================
-// OpenClaw Agent Configuration: Player Agent Template (HTTP Mode)
+// OpenClaw Agent Configuration: Player Agent Template
 // ============================================================================
 //
-// This is a template configuration for a player agent using HTTP API mode.
+// This is a template configuration for a Cyber-Jianghu player agent.
 // Copy this file and customize it for your agent.
 //
 // Usage:
@@ -10,12 +10,13 @@
 //   # Edit the file and replace placeholders with actual values
 //
 // Architecture:
-//   OpenClaw Gateway (Brain) <--HTTP--> cyber-jianghu-agent (Body) <--WebSocket--> Game Server (World)
-//       Port: 23340-23349                   ws://host:23333/ws
+//   OpenClaw Gateway (Brain) <--WebSocket--> cyber-jianghu-agent (Body) <--WebSocket--> Game Server (World)
+//       Primary connection                            ws://host:23333/ws
+//       HTTP API for state queries
 //
 // Tick-Driven Workflow:
 //   1. Game Server sends WorldState to Agent via WebSocket
-//   2. Agent updates HTTP API state (GET /api/v1/tick for polling)
+//   2. Agent broadcasts tick to connected OpenClaw via WebSocket
 //   3. OpenClaw cron fires -> bootstrap hook checks for new tick
 //   4. If new tick: fetch CONTEXT.md, LLM decides, calls cyber_jianghu_act
 //   5. Agent submits Intent to Game Server before deadline
