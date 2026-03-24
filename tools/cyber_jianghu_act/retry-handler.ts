@@ -1,14 +1,18 @@
 // integration/openclaw/tools/jianghu_act/retry-handler.ts
 // ============================================================================
-// Retry Handler - Retry logic and fallback mechanisms
+// Retry Handler - Retry logic and validation
 // ============================================================================
 //
 // 数据驱动设计：
 // - 使用通用 HTTP 客户端，不定义具体接口
 // - 所有 API 调用以 crates/agent 实际披露的为准
+//
+// 重要说明：
+// - Intent 提交必须通过 WebSocket，HTTP API /api/v1/intent 已禁用
+// - 本模块仅用于验证 intent，不负责提交
+// - Agent 端有独立的超时机制，确保即使验证失败也会提交 idle
 
 import type { HttpClient } from "./http-client.js";
-import { buildIntentFromParams } from "./intent-builder.js";
 import type {
 	ActionResult,
 	GameActionParams,
@@ -97,9 +101,12 @@ export async function executeWithRetry(
 }
 
 /**
- * Execute a single game action (validation + submission)
+ * Execute a single game action (validation only)
  *
- * 使用通用 HTTP 客户端，直接调用 crates/agent API
+ * 使用通用 HTTP 客户端，调用 crates/agent 验证 API
+ *
+ * 注意：此函数仅验证 intent，不负责提交
+ * Intent 提交必须通过 WebSocket，HTTP API /api/v1/intent 已禁用
  */
 async function executeGameAction(
 	params: GameActionParams,
@@ -107,10 +114,7 @@ async function executeGameAction(
 ): Promise<ActionResult> {
 	const { httpClient, agentId, tickId, worldState, persona } = context;
 
-	// 1. Build Intent
-	const intent = buildIntentFromParams(params, agentId, tickId);
-
-	// 2. Build validation request
+	// 1. Build validation request
 	// 使用服务端提供的 context（如果有），否则使用简单的 context
 	const worldContextStr = worldState
 		? JSON.stringify({
@@ -120,17 +124,17 @@ async function executeGameAction(
 			})
 		: "{}";
 
-	// 3. Call validation endpoint (POST /api/v1/validate)
+	// 2. Call validation endpoint (POST /api/v1/validate)
 	const validateResponse = await httpClient.post<{
 		valid: boolean;
 		reason?: string;
 		rejection_type?: string;
 		narrative?: string;
 	}>("/api/v1/validate", {
-		action_type: intent.action_type,
-		agent_id: intent.agent_id,
-		tick_id: intent.tick_id,
-		action_data: intent.action_data,
+		action_type: params.action,
+		agent_id: agentId,
+		tick_id: tickId,
+		action_data: params.data ? { target: params.target, data: params.data } : undefined,
 		persona_gender: persona.gender,
 		persona_age: persona.age,
 		persona_personality: persona.personality,
@@ -138,7 +142,7 @@ async function executeGameAction(
 		world_context: worldContextStr,
 	});
 
-	// 4. Handle validation result
+	// 3. Handle validation result
 	if (!validateResponse.valid) {
 		return {
 			success: false,
@@ -148,9 +152,8 @@ async function executeGameAction(
 		};
 	}
 
-	// 5. Validation approved - submit intent (POST /api/v1/intent)
-	await httpClient.post("/api/v1/intent", intent);
-
+	// 4. Validation approved
+	// 注意：实际提交需要通过 WebSocket，由调用者负责
 	return {
 		success: true,
 		narrative: validateResponse.narrative,
@@ -172,6 +175,10 @@ function generateRetryHint(response: {
 
 /**
  * Handle fallback when all retries fail
+ *
+ * 注意：不再尝试通过 HTTP 提交 idle
+ * HTTP API /api/v1/intent 已禁用，必须通过 WebSocket 提交
+ * Agent 端有独立的超时机制，会自动提交 idle
  */
 async function handleFallback(
 	originalParams: GameActionParams,
@@ -186,26 +193,19 @@ async function handleFallback(
 		tick: context.tickId,
 	});
 
-	console.log(
-		`[retry-handler] All retries failed, returning idle for LLM to decide next action`,
+	console.error(
+		`[retry-handler] All retries failed for tick ${context.tickId}.\n` +
+		`[retry-handler] Original action: ${originalParams.action}\n` +
+		`[retry-handler] Last error: ${lastError}\n` +
+		`[retry-handler] HTTP API /api/v1/intent is disabled - cannot submit fallback.\n` +
+		`[retry-handler] Agent will auto-submit idle after timeout (tick_duration * 0.8).`
 	);
 
-	// 提交 idle 动作
-	const idleIntent = buildIntentFromParams(
-		{ action: "idle", reasoning: `重试失败: ${lastError}` },
-		context.agentId,
-		context.tickId,
-	);
-
-	try {
-		await context.httpClient.post("/api/v1/intent", idleIntent);
-	} catch (error) {
-		console.error("[retry-handler] Idle submission failed:", error);
-	}
-
+	// 返回失败，让调用者知道需要通过 WebSocket 提交 idle
 	return {
-		success: true,
-		narrative: `验证多次失败，已执行 idle。请根据 CONTEXT.md 重新决策。`,
+		success: false,
+		error: `验证多次失败: ${lastError}`,
+		hint: "请通过 WebSocket 提交 idle 动作，或等待 Agent 超时自动提交",
 	};
 }
 
