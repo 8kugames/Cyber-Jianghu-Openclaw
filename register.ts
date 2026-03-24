@@ -12,6 +12,8 @@
 // - Submit intents via WebSocket
 // ============================================================================
 
+import { promises as fs } from "fs";
+
 /**
  * Plugin API type (minimal definition for type safety)
  */
@@ -62,13 +64,29 @@ interface SharedTickState {
 
 let sharedTickState: SharedTickState | null = null;
 let wsClient: any = null;
+let registerCallId = 0;
+let isInitializing = false;
 
 /**
  * Plugin entry point - called by OpenClaw when the plugin is loaded
  */
 export default async function register(api: PluginAPI) {
+	const callId = ++registerCallId;
+	console.log(`[cyber-jianghu-openclaw] register() called #${callId}`);
+
+	if (isInitializing) {
+		console.log(`[cyber-jianghu-openclaw] Initialization in progress, skipping #${callId}`);
+		return;
+	}
+	if (wsClient) {
+		console.log(`[cyber-jianghu-openclaw] Already initialized, skipping #${callId}`);
+		return;
+	}
+
+	isInitializing = true;
+
 	// Initialize WebSocket connection to Agent
-	initWebSocket(api);
+	await initWebSocket(api);
 
 	// Register cyber_jianghu_act tool
 	//
@@ -299,10 +317,12 @@ async function initWebSocket(api: PluginAPI): Promise<void> {
 		console.log("[cyber-jianghu-openclaw] Connecting to Agent via WebSocket...");
 
 		const client = await getWsClientAsync(0);
+
+		// CRITICAL: Set wsClient BEFORE any async operations to prevent double initialization
 		wsClient = client;
 
 		// Handle tick messages
-		client.onTick((tick) => {
+		client.onTick(async (tick) => {
 			console.log(`[cyber-jianghu-openclaw] Tick ${tick.tick_id} received (deadline: ${tick.deadline_ms})`);
 			sharedTickState = {
 				tickId: tick.tick_id,
@@ -311,6 +331,9 @@ async function initWebSocket(api: PluginAPI): Promise<void> {
 				state: tick.state,
 				context: tick.context,
 			};
+
+			// 生成并写入 CONTEXT.md
+			await updateContextMd(tick.tick_id);
 		});
 
 		// Handle tick closed messages
@@ -333,8 +356,38 @@ async function initWebSocket(api: PluginAPI): Promise<void> {
 			console.log("[cyber-jianghu-openclaw] WebSocket connected to Agent");
 		});
 
+		// Now connect after wsClient is set
 		await client.connect();
 	} catch (e) {
 		console.error("[cyber-jianghu-openclaw] Failed to connect to Agent:", e);
+	} finally {
+		isInitializing = false;
+	}
+}
+
+// 跟踪上一个写入的 tick ID，避免重复写入
+let lastWrittenTickId = 0;
+
+// 生成并写入 CONTEXT.md - 仅使用 WebSocket 传递的 context，禁止 HTTP
+async function updateContextMd(tickId: number): Promise<void> {
+	if (tickId <= lastWrittenTickId) {
+		return;
+	}
+
+	const context = sharedTickState?.context;
+	if (!context) {
+		console.warn("[cyber-jianghu-openclaw] No context available from WebSocket tick");
+		return;
+	}
+
+	const workspaceDir = "/home/node/workspace";
+	const filePath = `${workspaceDir}/CONTEXT.md`;
+
+	try {
+		await fs.writeFile(filePath, context, "utf-8");
+		lastWrittenTickId = tickId;
+		console.log(`[cyber-jianghu-openclaw] CONTEXT.md updated for tick ${tickId}`);
+	} catch (e) {
+		console.error("[cyber-jianghu-openclaw] Failed to write CONTEXT.md:", e);
 	}
 }

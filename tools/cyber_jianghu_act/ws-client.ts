@@ -143,7 +143,7 @@ const DEFAULT_WS_CONFIG: WsClientConfig = {
 	port: 23340,
 	connectTimeoutMs: 5000,
 	recvTimeoutMs: 60000,
-	reconnectDelayMs: 1000,
+	reconnectDelayMs: 5000,  // Increased to 5s to allow agent to detect dead connection
 	maxReconnectAttempts: 3,
 };
 
@@ -155,6 +155,8 @@ export class WsClient {
 	private ws: WebSocket | null = null;
 	private reconnectAttempts: number = 0;
 	private shouldReconnect: boolean = true;
+	private isReconnecting: boolean = false;
+	private isConnecting: boolean = false;
 	private tickHandler: ((tick: TickMessage) => void) | null = null;
 	private tickClosedHandler: ((msg: TickClosedMessage) => void) | null = null;
 	private reviewHandler: ((msg: ReviewRequestMessage) => void) | null = null;
@@ -170,11 +172,27 @@ export class WsClient {
 	 * Connect to Agent WebSocket
 	 */
 	async connect(): Promise<void> {
+		if (this.isConnecting) {
+			console.log("[ws-client] Connection in progress, skipping");
+			return;
+		}
+		if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+			console.log("[ws-client] Already connected, skipping");
+			return;
+		}
+		if (this.ws && this.ws.readyState === WebSocket.CONNECTING) {
+			console.log("[ws-client] Connection already in progress, skipping");
+			return;
+		}
+
+		this.isConnecting = true;
+
 		const url = `ws://${this.config.host}:${this.config.port}/ws`;
 		console.log(`[ws-client] Connecting to ${url}`);
 
 		return new Promise((resolve, reject) => {
 			const timeout = setTimeout(() => {
+				this.isConnecting = false;
 				reject(new Error(`Connection timeout after ${this.config.connectTimeoutMs}ms`));
 			}, this.config.connectTimeoutMs);
 
@@ -185,6 +203,8 @@ export class WsClient {
 					clearTimeout(timeout);
 					console.log("[ws-client] Connected");
 					this.reconnectAttempts = 0;
+					this.isReconnecting = false;
+					this.isConnecting = false;
 					this.onConnectHandler?.();
 					resolve();
 				};
@@ -206,13 +226,13 @@ export class WsClient {
 
 				this.ws.onclose = (event) => {
 					console.log(`[ws-client] Disconnected: ${event.code} ${event.reason}`);
+					this.isConnecting = false;
 					this.onDisconnectHandler?.();
-					if (this.shouldReconnect && this.reconnectAttempts < this.config.maxReconnectAttempts) {
-						this.scheduleReconnect();
-					}
 				};
 			} catch (e) {
 				clearTimeout(timeout);
+				this.isConnecting = false;
+				this.isReconnecting = false;
 				reject(e);
 			}
 		});
@@ -361,6 +381,7 @@ export class WsClient {
 // ============================================================================
 
 let globalWsClient: WsClient | null = null;
+let isConnecting: boolean = false;
 
 /**
  * Get or create global WebSocket client
@@ -369,38 +390,59 @@ export async function getWsClientAsync(
 	port: number = 0,
 	host?: string,
 ): Promise<WsClient> {
+	// If we have an existing client that's connected, reuse it
 	if (globalWsClient && globalWsClient.isConnected()) {
 		return globalWsClient;
 	}
 
-	const { discoverPort } = await import("./http-client.js");
-
-	// Discover port if needed
-	let targetPort = port;
-	if (targetPort === 0) {
-		const discovered = await discoverPort(host);
-		if (!discovered) {
-			throw new Error("No agent found in port range 23340-23349");
+	// Wait if another connect is in progress
+	if (isConnecting) {
+		console.log("[ws-client] Connection in progress, waiting...");
+		while (isConnecting) {
+			await new Promise(resolve => setTimeout(resolve, 500));
 		}
-		targetPort = discovered;
+		// After waiting, check again
+		if (globalWsClient && globalWsClient.isConnected()) {
+			return globalWsClient;
+		}
 	}
 
-	// Determine host:
-	// 1. Use provided host
-	// 2. Use DOCKER_AGENT_HOST env var (for containerized deployment)
-	// 3. Use host.docker.internal (Docker Desktop on Mac/Windows)
-	// 4. Fall back to 127.0.0.1
-	const targetHost = host ||
-		process.env.DOCKER_AGENT_HOST ||
-		"host.docker.internal";
+	isConnecting = true;
 
-	// Create client
-	globalWsClient = new WsClient({
-		host: targetHost,
-		port: targetPort,
-	});
+	try {
+		// Reset any existing client before creating a new one
+		if (globalWsClient) {
+			globalWsClient.disconnect();
+			globalWsClient = null;
+		}
 
-	return globalWsClient;
+		const { discoverPort } = await import("./http-client.js");
+
+		// Discover port if needed
+		let targetPort = port;
+		if (targetPort === 0) {
+			const discovered = await discoverPort(host);
+			if (!discovered) {
+				throw new Error("No agent found in port range 23340-23349");
+			}
+			targetPort = discovered;
+		}
+
+		// Determine host:
+		const targetHost = host ||
+			process.env.DOCKER_AGENT_HOST ||
+			"host.docker.internal";
+
+		// Create client
+		globalWsClient = new WsClient({
+			host: targetHost,
+			port: targetPort,
+		});
+
+		return globalWsClient;
+	} finally {
+		isConnecting = false;
+	}
 }
 
 /**
