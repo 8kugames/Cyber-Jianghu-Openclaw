@@ -17,8 +17,8 @@ metadata:
 
       初始化流程:
       1. 确认 cyber-jianghu-agent 已部署并运行
-      2. OpenClaw 自动扫描 23340-23349 端口连接 Agent
-      3. OpenClaw 通过 HTTP API 与 Agent 通信
+      2. OpenClaw 通过 WebSocket 主动连接 Agent
+      3. OpenClaw 通过 HTTP API 查询状态（fallback: intent 提交）
 
       默认配置:
       - 游戏服务器: http://47.102.120.116:23333 (官方测试服)
@@ -39,14 +39,14 @@ metadata:
 
 #### 方式一：Docker 部署（推荐）
 
-```bash
-# 启动 agent 容器
-docker run -d \
-  --name cyber-jianghu-agent \
-  -p 23340:23340 \
-  -e GAME_SERVER_URL=http://47.102.120.116:23333 \
-  agent-agent
-```
+  ```bash
+  # 启动 agent 容器
+  docker run -d \
+    --name cyber-jianghu-agent \
+    -p 23340:23340 \
+    -e GAME_SERVER_URL=http://47.102.120.116:23333 \
+    ghcr.io/8kugames/cyber-jianghu-agent:latest
+  ```
 
 #### 方式二：直接部署
 
@@ -69,6 +69,8 @@ curl http://localhost:23340/api/v1/health
 一旦 agent 在 23340-23349 端口运行，OpenClaw 会自动检测并连接。
 
 **OpenClaw 不负责部署、安装或管理 agent，除非你的用户明确要求。**
+
+> **详细部署指南**：持久化配置、服务保活、故障排除，见 [DEPLOYMENT.md](./DEPLOYMENT.md)。
 
 ## 架构说明
 
@@ -119,17 +121,22 @@ Agent 暴露 WebSocket 端点 (`/ws`)，OpenClaw 作为客户端连接：
 - `intent`: 提交决策
 - `review_result`: Observer 审查结果
 
-## 启动 Agent HTTP API
+## 启动 Agent
 
-推荐使用 **HTTP 模式** 启动 Agent，这是一种更简洁、更容易调试的集成方式。
+Agent 启动后会同时暴露 WebSocket 和 HTTP API：
+
+- **WebSocket** (`/ws`)：OpenClaw 连接以接收 tick 和提交 intent
+- **HTTP API** (`/api/v1/*`)：OpenClaw 查询状态用
 
 ```bash
-# 启动 crates/agent HTTP API 服务器
+# 启动 Agent（WebSocket + HTTP API 同时可用）
+cyber-jianghu-agent run --mode http --port 23340
+
 # 端口 0 表示在 23340~23349 范围内随机选择可用端口
 cyber-jianghu-agent run --mode http --port 0
 ```
 
-OpenClaw Hook 会自动扫描 `23340-23349` 端口范围，找到响应 `/api/v1/health` 的端口后自动连接。
+OpenClaw 启动时会自动扫描 `23340-23349` 端口，通过 WebSocket 连接到 Agent。
 
 ## 首次使用：角色注册 (Registration)
 

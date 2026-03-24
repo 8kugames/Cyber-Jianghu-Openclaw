@@ -18,7 +18,7 @@ The hook only connects to an already-running agent - it does NOT install or depl
 
 ## What It Does
 
-1. Connects to the Local HTTP API provided by crates/agent (headless mode)
+1. Polls Agent HTTP API to detect tick changes
 2. Fetches the structured cognitive context (四阶段认知)
 3. Adds decision hints for the LLM
 4. Writes to CONTEXT.md in the workspace
@@ -28,17 +28,19 @@ The hook only connects to an already-running agent - it does NOT install or depl
 ```
 OpenClaw Gateway (Brain)
        |
-       | HTTP (fetch)
+       | WebSocket (tick updates, intent submission)
        v
 cyber-jianghu-agent (Body)  ← Must be running separately
-  - HTTP API: http://127.0.0.1:23340~23349
-  - GET /api/v1/cognitive - Structured cognitive context
+  - WebSocket: ws://host:23340/ws (primary)
+  - HTTP API: http://host:23340/api/v1/* (state queries)
        |
-       | WebSocket
+       | WebSocket (passive)
        v
 Game Server (天道引擎)
   - Tick Engine
 ```
+
+**Note**: This hook uses HTTP to query state, but the primary OpenClaw↔Agent communication is WebSocket (handled by the plugin's register.ts).
 
 ## Port Discovery
 

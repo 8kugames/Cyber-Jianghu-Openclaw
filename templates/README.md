@@ -93,7 +93,7 @@ Example:
 ./integration/openclaw/init-agent-workspace.sh historian 23335
 ```
 
-Then start separate `cyber-jianghu-agent` instances (HTTP mode):
+Then start separate `cyber-jianghu-agent` instances:
 ```bash
 # Terminal 1
 cyber-jianghu-agent run --mode http --port 23340
