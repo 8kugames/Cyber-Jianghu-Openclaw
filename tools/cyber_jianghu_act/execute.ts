@@ -1,38 +1,48 @@
 // tools/jianghu_act/execute.ts
 // ============================================================================
-// Game Action Execution - Submit intents to agent HTTP API
+// Game Action Execution - Validate intents via agent HTTP API
 // ============================================================================
 //
 // 数据驱动设计：
 // - 使用通用 HTTP 客户端，不定义具体接口
 // - 所有接口以 crates/agent 实际披露的为准
 // - Intent 构建在 intent-builder.ts 中处理
+//
+// 重要说明：
+// - Intent 提交必须通过 WebSocket，HTTP API /api/v1/intent 已禁用
+// - 本模块仅提供验证功能，不负责提交
+// - Agent 端有独立的超时机制，确保即使验证失败也会提交 idle
 
 import { getHttpClientAsync } from "./http-client.js";
-import { buildIntentFromParams } from "./intent-builder.js";
-import type { GameActionParams, Intent, PersonaInfo } from "./types.js";
-
-// Re-export buildIntentFromParams as buildIntent for backward compat within module
-export { buildIntentFromParams as buildIntent } from "./intent-builder.js";
+import type { Intent, PersonaInfo } from "./types.js";
 
 /**
- * Submit an intent directly to the agent HTTP API
+ * @deprecated
+ * HTTP API /api/v1/intent 已禁用，必须通过 WebSocket 提交 intent
  *
- * POST /api/v1/intent
+ * 此函数仅用于调试目的，生产环境不应使用。
+ * 请使用 WebSocket client 的 sendIntent 方法提交 intent。
+ *
+ * @throws Error - 始终抛出错误，提示使用 WebSocket
  */
 export async function submitIntentToServer(
-	intent: Intent,
-	port: number = 0,
+	_intent: Intent,
+	_port: number = 0,
 ): Promise<void> {
-	const httpClient = await getHttpClientAsync(port);
-	await httpClient.post("/api/v1/intent", intent);
-	console.log(`[execute] Submitted: ${intent.action_type}`);
+	throw new Error(
+		"[execute] HTTP API /api/v1/intent is DISABLED.\n" +
+		"[execute] You MUST submit intents via WebSocket.\n" +
+		"[execute] Use wsClient.sendIntent(tickId, actionType, actionData, thoughtLog) instead.\n" +
+		"[execute] See ws-client.ts for WebSocket client implementation."
+	);
 }
 
 /**
  * Validate an intent using the agent HTTP API
  *
  * POST /api/v1/validate
+ *
+ * 此端点仍然可用，用于在提交前验证 intent
  */
 export async function validateIntent(request: {
 	intent: Intent;
@@ -61,17 +71,24 @@ export async function validateIntent(request: {
 }
 
 /**
- * Build and submit intent in one step
+ * @deprecated
+ * HTTP API /api/v1/intent 已禁用，必须通过 WebSocket 提交 intent
  *
- * Convenience function that combines buildIntentFromParams + submitIntentToServer
+ * 此函数仅用于调试目的，生产环境不应使用。
+ * 请使用 WebSocket client 的 sendIntent 方法提交 intent。
+ *
+ * @throws Error - 始终抛出错误，提示使用 WebSocket
  */
 export async function buildAndSubmitIntent(
-	params: GameActionParams,
-	agentId: string,
-	tickId: number,
-	port: number = 0,
+	_params: { action: string; target?: string; data?: string; reasoning?: string },
+	_agentId: string,
+	_tickId: number,
+	_port: number = 0,
 ): Promise<Intent> {
-	const intent = buildIntentFromParams(params, agentId, tickId);
-	await submitIntentToServer(intent, port);
-	return intent;
+	throw new Error(
+		"[execute] HTTP API /api/v1/intent is DISABLED.\n" +
+		"[execute] You MUST submit intents via WebSocket.\n" +
+		"[execute] Use wsClient.sendIntent(tickId, actionType, actionData, thoughtLog) instead.\n" +
+		"[execute] See ws-client.ts for WebSocket client implementation."
+	);
 }

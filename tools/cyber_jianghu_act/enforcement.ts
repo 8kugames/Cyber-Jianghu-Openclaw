@@ -12,11 +12,11 @@
 // 架构说明：
 // - register.ts 中的 jianghu_act 工具只记录意图
 // - 这个 hook 负责实际的验证、提交和记忆归档
+// - Intent 提交必须通过 WebSocket，HTTP API 端点已禁用
+// - Agent 端有独立的超时机制，确保即使 OpenClaw 失败也会提交 idle
 
 import { getHttpClientAsync } from "./http-client.js";
-import { executeWithRetry } from "./retry-handler.js";
 import type { GameActionParams, PersonaInfo, WorldState } from "./types.js";
-import { DEFAULT_RETRY_CONFIG } from "./types.js";
 
 /**
  * 重要性评分配置
@@ -96,18 +96,21 @@ export async function runEnforcement(
 	const gameActionCalled = !!gameActionCall;
 
 	if (!gameActionCalled || !gameActionCall) {
-		console.warn("[enforcement] LLM did not call jianghu_act, submitting idle action");
-		await submitIdleAction(context);
+		console.warn("[enforcement] LLM did not call jianghu_act");
+		// 尝试通过 WebSocket 提交 idle
+		if (context.wsClient && context.wsClient.isConnected()) {
+			console.log("[enforcement] Submitting idle via WebSocket");
+			context.wsClient.sendIntent(context.tickId || 0, "idle", undefined, "LLM did not call jianghu_act");
+		} else {
+			console.error("[enforcement] WebSocket not connected, cannot submit idle. Agent will handle timeout.");
+		}
 		return;
 	}
 
 	// 提取参数
 	const params = gameActionCall as GameActionParams;
 
-	// 获取 Persona（必须从配置加载）
-	const persona = await getPersona(context);
-
-	// 执行动作（带重试）
+	// 执行动作
 	try {
 		const httpClient = await getHttpClientAsync(context.localApiPort || 0);
 
@@ -132,23 +135,15 @@ export async function runEnforcement(
 			return;
 		}
 
-		// 否则使用 HTTP
-		console.log("[enforcement] WebSocket not available, using HTTP");
-		const executeContext = {
-			httpClient,
-			agentId: context.agentId || "unknown",
-			tickId: context.tickId || 0,
-			worldState: context.worldState || null,
-			persona,
-		};
-
-		const result = await executeWithRetry(params, executeContext, DEFAULT_RETRY_CONFIG);
-
-		if (!result.success) {
-			console.warn(`[enforcement] Action failed: ${result.error}`);
-		}
-
-		// 归档决策到记忆
+		// WebSocket 不可用 - 输出错误，不使用 HTTP fallback
+		// HTTP API /api/v1/intent 端点已禁用，必须使用 WebSocket
+		// Agent 端有独立的超时机制，会在超时后自动提交 idle
+		console.error(
+			"[enforcement] WebSocket not connected! Intent submission requires WebSocket.\n" +
+			"[enforcement] HTTP API /api/v1/intent is disabled - you must connect via WebSocket.\n" +
+			"[enforcement] Agent will auto-submit idle after timeout (tick_duration * 0.8).\n" +
+			`[enforcement] Lost intent: tick=${context.tickId}, action=${params.action}`
+		);
 		await archiveDecision(context, params, gameActionCalled);
 	} catch (error) {
 		console.error("[enforcement] Failed to execute action:", error);
@@ -178,151 +173,6 @@ async function validateTickBoundary(
 	} catch (error) {
 		console.warn("[enforcement] Failed to validate tick boundary:", error);
 		return { valid: true, currentTick: intentTickId };
-	}
-}
-
-/**
- * Get persona from context, config, or SOUL.md
- *
- * 数据驱动：必须从配置加载，无假数据兜底
- *
- * Priority:
- * 1. context.persona (from enforcement call)
- * 2. config.persona (from OpenClaw config)
- * 3. SOUL.md (if workspace available)
- * 4. Error - persona is required
- */
-async function getPersona(
-	context: {
-		persona?: PersonaInfo;
-		config?: { persona?: Partial<PersonaInfo> };
-		workspace?: { readFile?: (path: string) => Promise<string> };
-		agentId?: string;
-	}
-): Promise<PersonaInfo> {
-	// 1. Use context.persona if provided
-	if (context.persona) {
-		return context.persona;
-	}
-
-	// 2. Use config.persona if provided
-	if (context.config?.persona) {
-		const p = context.config.persona;
-		// 必须提供 gender 和 age
-		if (!p.gender || !p.age) {
-			throw new Error(
-				"[enforcement] config.persona 必须提供 gender 和 age。" +
-				"请在 OpenClaw 配置或 SOUL.md 中定义角色信息。"
-			);
-		}
-		return {
-			gender: p.gender,
-			age: p.age,
-			personality: p.personality || [],
-			values: p.values || [],
-		};
-	}
-
-	// 3. Try to load from SOUL.md
-	if (context.workspace?.readFile) {
-		try {
-			const soulContent = await context.workspace.readFile("SOUL.md");
-			const persona = parsePersonaFromSoul(soulContent);
-			// 验证必要字段
-			if (persona.gender === "未知" || persona.age === 0) {
-				throw new Error(
-					"[enforcement] SOUL.md 必须包含性别和年龄信息。" +
-					"示例格式:\n" +
-					"- 性别: 女\n" +
-					"- 年龄: 25岁"
-				);
-			}
-			return persona;
-		} catch (e) {
-			if (e instanceof Error && e.message.includes("必须")) {
-				throw e;
-			}
-			console.warn("[enforcement] Failed to read SOUL.md:", e);
-		}
-	}
-
-	// 4. Error - persona is required for data-driven design
-	throw new Error(
-		"[enforcement] 未找到角色配置。必须通过以下方式之一提供 persona:\n" +
-		"1. context.persona（代码传入）\n" +
-		"2. config.persona（OpenClaw 配置）\n" +
-		"3. SOUL.md（工作区文件）"
-	);
-}
-
-/**
- * Parse persona info from SOUL.md content
- *
- * 数据驱动：解析 Markdown 格式的角色定义
- */
-function parsePersonaFromSoul(content: string): PersonaInfo {
-	const persona: PersonaInfo = {
-		gender: "未知",
-		age: 0,
-		personality: [],
-		values: [],
-	};
-
-	const lines = content.split("\n");
-
-	for (const line of lines) {
-		const trimmed = line.trim();
-
-		// Extract gender (支持多种格式)
-		// - 性别: 女
-		// - **性别**: 女
-		// - 性别：女
-		const genderMatch = trimmed.match(/(?:\*{0,2}性别\*{0,2})\s*[:：]\s*(男|女|未知)/);
-		if (genderMatch) {
-			persona.gender = genderMatch[1];
-		}
-
-		// Extract age (支持多种格式)
-		// - 年龄: 25岁
-		// - **年龄**: 25
-		// - 年龄：25
-		const ageMatch = trimmed.match(/(?:\*{0,2}年龄\*{0,2})\s*[:：]\s*(\d+)/);
-		if (ageMatch) {
-			persona.age = parseInt(ageMatch[1], 10);
-		}
-
-		// Extract personality traits (列表项)
-		if (trimmed.startsWith("-") || trimmed.startsWith("*")) {
-			const trait = trimmed.replace(/^[-*]\s*/, "").trim();
-			// Skip headers, long descriptions, and empty lines
-			if (trait.length > 0 && trait.length < 20 && !trait.includes(":") && !trait.startsWith("#")) {
-				persona.personality.push(trait);
-			}
-		}
-	}
-
-	return persona;
-}
-
-/**
- * Submit idle action when LLM fails to call jianghu_act
- */
-async function submitIdleAction(
-	context: { tickId?: number; agentId?: string; localApiPort?: number },
-): Promise<void> {
-	try {
-		const httpClient = await getHttpClientAsync(context.localApiPort || 0);
-
-		const idleIntent = {
-			agent_id: context.agentId || "unknown",
-			tick_id: context.tickId || 0,
-			action_type: "idle",
-		};
-
-		// POST /api/v1/intent
-		await httpClient.post("/api/v1/intent", idleIntent);
-	} catch (error) {
-		console.error("[enforcement] Failed to submit idle action:", error);
 	}
 }
 
