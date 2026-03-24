@@ -2,13 +2,13 @@
 name: cyber-jianghu-openclaw-bootstrap
 description: "Bootstrap hook for Cyber-Jianghu agent - fetches WorldState and generates CONTEXT.md"
 homepage: https://github.com/8kugames/Cyber-Jianghu-Openclaw
-# metadata.openclaw.events is an internal OpenClaw field for hook triggering
-# This hook activates on agent:bootstrap and agent:cron events
+metadata:
+  { "openclaw": { "events": ["agent:bootstrap", "gateway:startup"] } }
 ---
 
 # Cyber-Jianghu OpenClaw Bootstrap Hook
 
-This hook runs when the agent starts or on cron/tick.
+This hook runs when the OpenClaw gateway starts or when agent bootstrap occurs.
 
 ## Prerequisites
 
