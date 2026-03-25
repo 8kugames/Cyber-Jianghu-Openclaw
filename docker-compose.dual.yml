@@ -1,0 +1,127 @@
+# docker-compose.dual.yml
+# ============================================================================
+# Dual-Process Architecture Deployment
+# ============================================================================
+#
+# This configuration runs Player Agent and Observer Agent in separate containers.
+#
+# Architecture:
+#   ┌─────────────────┐     ┌─────────────────┐
+#   │  Player Agent   │     │ Observer Agent  │
+#   │  (OpenClaw)     │     │  (OpenClaw)     │
+#   │                 │     │                 │
+#   │ - cyber_jianghu │     │ - cyber_jianghu │
+#   │   _act          │◄────│   _review       │
+#   │ - WebSocket     │     │ - HTTP polling  │
+#   │ - Heartbeat     │     │                 │
+#   └────────┬────────┘     └─────────────────┘
+#            │
+#            │ WebSocket (passive)
+#            ▼
+#   ┌─────────────────┐
+#   │  cyber-jianghu  │
+#   │    -agent       │
+#   │    (Rust)       │
+#   └────────┬────────┘
+#            │
+#            ▼
+#   ┌─────────────────┐
+#   │  Game Server    │
+#   │  (天道引擎)      │
+#   └─────────────────┘
+#
+# Prerequisites:
+# - cyber-jianghu-agent must be deployed and running
+# - Set environment variables or use .env file
+#
+# Usage:
+#   docker-compose -f docker-compose.dual.yml up -d
+
+version: "3.8"
+
+services:
+  # ============================================================================
+  # Player Agent - Main agent that submits game actions
+  # ============================================================================
+  player-agent:
+    image: ghcr.io/8kugames/cyber-jianghu-openclaw:latest
+    container_name: cyber-jianghu-player
+    restart: unless-stopped
+
+    environment:
+      # Agent connection (connect to external Agent)
+      - DOCKER_AGENT_HOST=${AGENT_HOST:-host.docker.internal}
+      # Character configuration (required in headless mode)
+      - CHARACTER_NAME=${CHARACTER_NAME:-}
+      - CHARACTER_AGE=${CHARACTER_AGE:-}
+      - CHARACTER_GENDER=${CHARACTER_GENDER:-}
+      - CHARACTER_IDENTITY=${CHARACTER_IDENTITY:-}
+      - CHARACTER_PERSONALITY=${CHARACTER_PERSONALITY:-}
+      - CHARACTER_VALUES=${CHARACTER_VALUES:-}
+      # Run in headless mode (no interactive prompts)
+      - HEADLESS=true
+
+    volumes:
+      - player_workspace:/home/node/workspace
+      - ./agent.json5:/config/agent.json5:ro
+
+    # Expose port for Observer Agent to connect
+    ports:
+      - "${PLAYER_PORT:-23340}:23340"
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:23340/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================================================================
+  # Observer Agent - Reviews Player Agent's intents
+  # ============================================================================
+  observer-agent:
+    image: ghcr.io/8kugames/cyber-jianghu-openclaw:latest
+    container_name: cyber-jianghu-observer
+    restart: unless-stopped
+
+    environment:
+      # Connect to Player Agent's Agent instance
+      - DOCKER_AGENT_HOST=player-agent
+      - PLAYER_API_URL=http://player-agent:23340
+      # Observer mode configuration
+      - OBSERVER_MODE=true
+      - OBSERVER_POLL_INTERVAL=5000
+      # Run in headless mode
+      - HEADLESS=true
+
+    volumes:
+      - observer_workspace:/home/node/workspace
+      - ./observer-agent.json5:/config/agent.json5:ro
+
+    depends_on:
+      player-agent:
+        condition: service_healthy
+
+    # No exposed ports - only internal communication
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  player_workspace:
+  observer_workspace:
+
+# ============================================================================
+# Network Configuration
+# ============================================================================
+# Default bridge network allows containers to communicate
+# using their service names as hostnames

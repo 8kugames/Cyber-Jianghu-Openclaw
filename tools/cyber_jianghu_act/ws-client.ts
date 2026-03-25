@@ -136,6 +136,12 @@ export interface WsClientConfig {
 	reconnectDelayMs: number;
 	/** Max reconnection attempts */
 	maxReconnectAttempts: number;
+	/** Ping interval in ms (heartbeat) */
+	pingIntervalMs: number;
+	/** Pong timeout in ms (heartbeat) */
+	pongTimeoutMs: number;
+	/** Idle timeout in ms - close connection if no message received */
+	idleTimeoutMs: number;
 }
 
 const DEFAULT_WS_CONFIG: WsClientConfig = {
@@ -145,6 +151,10 @@ const DEFAULT_WS_CONFIG: WsClientConfig = {
 	recvTimeoutMs: 60000,
 	reconnectDelayMs: 5000,  // Increased to 5s to allow agent to detect dead connection
 	maxReconnectAttempts: 3,
+	// Heartbeat configuration
+	pingIntervalMs: 30000,   // Send ping every 30 seconds
+	pongTimeoutMs: 10000,    // Wait 10 seconds for pong response
+	idleTimeoutMs: 50000,    // Close if no message for 50 seconds (< 1 tick)
 };
 
 /**
@@ -163,6 +173,11 @@ export class WsClient {
 	private onErrorHandler: ((error: Error) => void) | null = null;
 	private onConnectHandler: (() => void) | null = null;
 	private onDisconnectHandler: (() => void) | null = null;
+	// Heartbeat related members
+	private pingTimer: ReturnType<typeof setInterval> | null = null;
+	private idleCheckTimer: ReturnType<typeof setInterval> | null = null;
+	private pongTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
+	private lastMessageTime: number = 0;
 
 	constructor(config: Partial<WsClientConfig> = {}) {
 		this.config = { ...DEFAULT_WS_CONFIG, ...config };
@@ -205,13 +220,24 @@ export class WsClient {
 					this.reconnectAttempts = 0;
 					this.isReconnecting = false;
 					this.isConnecting = false;
+					// Start heartbeat on successful connection
+					this.startHeartbeat();
 					this.onConnectHandler?.();
 					resolve();
 				};
 
 				this.ws.onmessage = (event) => {
+					// Update last message time for idle detection
+					this.lastMessageTime = Date.now();
 					try {
-						const msg = JSON.parse(event.data) as DownstreamMessage;
+						const data = JSON.parse(event.data);
+						// Handle pong response - clear pong timeout
+						if (data.type === "pong") {
+							this.clearPongTimeout();
+							console.log("[ws-client] Pong received");
+							return;
+						}
+						const msg = data as DownstreamMessage;
 						this.handleMessage(msg);
 					} catch (e) {
 						console.error("[ws-client] Failed to parse message:", e);
@@ -227,7 +253,13 @@ export class WsClient {
 				this.ws.onclose = (event) => {
 					console.log(`[ws-client] Disconnected: ${event.code} ${event.reason}`);
 					this.isConnecting = false;
+					// Stop heartbeat on disconnect
+					this.stopHeartbeat();
 					this.onDisconnectHandler?.();
+					// Trigger reconnect if needed
+					if (this.shouldReconnect && this.reconnectAttempts < this.config.maxReconnectAttempts) {
+						this.scheduleReconnect();
+					}
 				};
 			} catch (e) {
 				clearTimeout(timeout);
@@ -243,6 +275,8 @@ export class WsClient {
 	 */
 	disconnect(): void {
 		this.shouldReconnect = false;
+		// Stop heartbeat before closing
+		this.stopHeartbeat();
 		if (this.ws) {
 			this.ws.close();
 			this.ws = null;
@@ -373,6 +407,83 @@ export class WsClient {
 				this.connect().catch((e) => console.error("[ws-client] Reconnect failed:", e));
 			}
 		}, delay);
+	}
+
+	/**
+	 * Start heartbeat mechanism
+	 * - Sends periodic pings to detect dead connections
+	 * - Monitors idle timeout to detect silent disconnections
+	 * - Tracks pong responses to detect unresponsive servers
+	 */
+	private startHeartbeat(): void {
+		this.lastMessageTime = Date.now();
+
+		// 1. Periodic ping to detect dead connections
+		this.pingTimer = setInterval(() => {
+			if (this.ws?.readyState === WebSocket.OPEN) {
+				// Browser WebSocket doesn't support ping/pong frames
+				// Use application-level heartbeat by sending a ping message
+				try {
+					this.ws.send(JSON.stringify({ type: "ping" }));
+					console.log("[ws-client] Ping sent");
+					// Set pong timeout - if no pong received within timeout, close connection
+					this.setPongTimeout();
+				} catch (e) {
+					console.warn("[ws-client] Failed to send ping:", e);
+				}
+			}
+		}, this.config.pingIntervalMs);
+
+		// 2. Idle timeout detection (fallback for silent disconnections)
+		this.idleCheckTimer = setInterval(() => {
+			const idleTime = Date.now() - this.lastMessageTime;
+			if (idleTime > this.config.idleTimeoutMs) {
+				console.warn(`[ws-client] Idle timeout (${idleTime}ms > ${this.config.idleTimeoutMs}ms), closing connection`);
+				this.stopHeartbeat();
+				this.ws?.close();
+			}
+		}, 10000); // Check every 10 seconds
+	}
+
+	/**
+	 * Set pong timeout timer
+	 * If no pong received within timeout, connection will be closed
+	 */
+	private setPongTimeout(): void {
+		// Clear any existing timeout first
+		this.clearPongTimeout();
+
+		this.pongTimeoutTimer = setTimeout(() => {
+			console.warn(`[ws-client] Pong timeout (no response within ${this.config.pongTimeoutMs}ms), closing connection`);
+			this.stopHeartbeat();
+			this.ws?.close();
+		}, this.config.pongTimeoutMs);
+	}
+
+	/**
+	 * Clear pong timeout timer
+	 */
+	private clearPongTimeout(): void {
+		if (this.pongTimeoutTimer) {
+			clearTimeout(this.pongTimeoutTimer);
+			this.pongTimeoutTimer = null;
+		}
+	}
+
+	/**
+	 * Stop heartbeat mechanism
+	 */
+	private stopHeartbeat(): void {
+		if (this.pingTimer) {
+			clearInterval(this.pingTimer);
+			this.pingTimer = null;
+		}
+		if (this.idleCheckTimer) {
+			clearInterval(this.idleCheckTimer);
+			this.idleCheckTimer = null;
+		}
+		// Clear pong timeout as well
+		this.clearPongTimeout();
 	}
 }
 

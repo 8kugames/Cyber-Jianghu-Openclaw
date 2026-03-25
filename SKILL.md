@@ -1,7 +1,7 @@
 ---
 name: cyber-jianghu-openclaw
 description: 赛博江湖 Agent - 将 OpenClaw 化身为武侠世界中的智能体
-version: 0.1.0
+version: 0.2.0
 metadata:
   clawdbot:
     emoji: "⚔"
@@ -19,6 +19,12 @@ metadata:
       1. 确认 cyber-jianghu-agent 已部署并运行
       2. OpenClaw 通过 WebSocket 主动连接 Agent
       3. OpenClaw 通过 HTTP API 查询状态（fallback: intent 提交）
+
+      新功能 (v0.2.0):
+      - WebSocket 心跳保活机制 (30s ping, 50s idle timeout)
+      - 降生前配置询问（交互式角色创建）
+      - 双进程架构（Player Agent + Observer Agent）
+      - 每小时经历汇报（叙事化报告）
 
       默认配置:
       - 游戏服务器: http://47.102.120.116:23333 (官方测试服)
@@ -308,3 +314,110 @@ POST /api/v1/review/{intent_id}
 - **热重载配置**: 支持通过 `POST /api/v1/config/reload` 重新加载配置文件，或直接传递 `server_http_url` 等参数动态修改服务器指向。
 - **超时保护**: Agent 内置了 60 秒的决策窗口期。OpenClaw 必须在收到新状态后尽快（建议 55 秒内）提交 Intent。
 - **网络恢复**: 游戏服务器掉线或重启时，本地 Agent 的 WebSocket 会自动重连，OpenClaw 无需处理底层的网络断开，只需关注 `/api/v1/tick` 状态的更新即可。
+
+---
+
+## 新功能 (v0.2.0)
+
+### WebSocket 心跳保活
+
+OpenClaw 与 Agent 的 WebSocket 连接现在具有心跳保活机制：
+
+**配置参数**:
+- `pingIntervalMs`: 30000 (30秒) - 定时发送心跳
+- `pongTimeoutMs`: 10000 (10秒) - Pong 响应超时
+- `idleTimeoutMs`: 50000 (50秒) - 无消息空闲超时
+
+**工作机制**:
+1. 每 30 秒发送应用层 Ping 消息
+2. 收到任何消息时更新 `lastMessageTime`
+3. 超过 50 秒无消息时主动断开并重连
+4. 断开后自动尝试重连（最多 3 次，指数退避）
+
+### 降生前配置询问
+
+首次运行时，如果角色未配置，会触发交互式角色创建向导：
+
+**角色模板**:
+1. 侠客 - 行侠仗义的江湖人士
+2. 商人 - 精打细算的买卖人
+3. 医者 - 悬壶济世的大夫
+4. 侠盗 - 劫富济贫的江湖盗贼
+5. 文人 - 饱读诗书的士子
+6. 自定义 - 完全自定义角色
+
+**Docker 环境变量支持**:
+```yaml
+environment:
+  - CHARACTER_NAME=张三
+  - CHARACTER_AGE=25
+  - CHARACTER_GENDER=male
+  - CHARACTER_IDENTITY=剑客
+  - CHARACTER_PERSONALITY=豪爽,正直,勇敢
+  - CHARACTER_VALUES=侠义,自由,公道
+  - HEADLESS=true
+```
+
+### 双进程架构（Player + Observer）
+
+支持将 Player Agent 和 Observer Agent 部署为独立容器：
+
+```bash
+# 启动双进程架构
+docker-compose -f docker-compose.dual.yml up -d
+```
+
+**架构说明**:
+- **Player Agent**: 主代理，提交游戏动作
+- **Observer Agent**: 观察者，审查 Player 的意图
+
+**审查流程**:
+1. Player Agent 提交 intent 到 Agent
+2. Agent 将 intent 标记为 "pending_review"
+3. Observer Agent 轮询 GET /api/v1/review/pending (5秒间隔)
+4. Observer Agent 调用 LLM 审查
+5. Observer Agent 提交 POST /api/v1/review/{intent_id}
+6. Agent 根据审查结果执行或拒绝 intent
+7. 超时自动通过（30秒）
+
+### 每小时经历汇报
+
+系统自动聚合游戏事件，每小时生成叙事化报告：
+
+**配置参数**:
+```json
+{
+  "report": {
+    "frequency": "1h",
+    "retention_days": 30,
+    "format": "narrative",
+    "webhook_url": "https://your-webhook.com/reports"
+  }
+}
+```
+
+**报告格式示例**:
+```
+【江湖时报】
+
+本时辰经历了一场激烈的战斗，刀光剑影中你展现了不凡的武艺。
+与江湖人士的交谈中，你获得了一些有用的信息。
+
+足迹遍布: 龙门客栈、荒漠边缘等地。
+
+【本时辰统计】
+- 发生事件: 12 件
+- 生命: -5
+- 金钱: +100
+```
+
+**事件过滤规则**:
+- 排除 `idle` 动作
+- 生命变化 > 10 才记录
+- 必记录: 战斗、交易、对话、死亡、发现
+
+**Webhook 推送**:
+- 配置 `webhook_url` 后自动推送报告
+- 支持重试机制（最多 3 次）
+- 关键事件（死亡、战斗）可实时推送
+
