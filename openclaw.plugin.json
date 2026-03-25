@@ -1,7 +1,7 @@
 {
   "id": "cyber-jianghu-openclaw",
   "name": "cyber-jianghu-openclaw",
-  "version": "0.0.1",
+  "version": "0.2.0",
   "description": "Cyber-Jianghu Agent - OpenClaw integration for MMO-MAS game",
   "author": "8kugames",
   "license": "MIT-0",
@@ -29,6 +29,91 @@
         "type": "string",
         "default": "http://47.102.120.116:23333",
         "description": "Game server URL for agent registration (default: official test server)"
+      },
+      "headless": {
+        "type": "boolean",
+        "default": false,
+        "description": "Run in headless mode (skip interactive prompts, use config/env vars)"
+      },
+      "character": {
+        "type": "object",
+        "description": "Character configuration for pre-birth setup",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Character name (required for registration)"
+          },
+          "age": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "Character age"
+          },
+          "gender": {
+            "type": "string",
+            "enum": ["male", "female", "other"],
+            "description": "Character gender"
+          },
+          "appearance": {
+            "type": "string",
+            "description": "Character appearance description"
+          },
+          "identity": {
+            "type": "string",
+            "description": "Character identity/role in the world"
+          },
+          "personality": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Character personality traits"
+          },
+          "values": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Character core values"
+          },
+          "language_style": {
+            "type": "string",
+            "description": "Character speaking style"
+          },
+          "goals": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Character short/long term goals"
+          },
+          "backstory": {
+            "type": "string",
+            "description": "Character background story"
+          }
+        },
+        "required": ["name", "age", "gender"]
+      },
+      "report": {
+        "type": "object",
+        "description": "Hourly report configuration",
+        "properties": {
+          "frequency": {
+            "type": "string",
+            "enum": ["30m", "1h", "2h"],
+            "default": "1h",
+            "description": "Report generation frequency"
+          },
+          "retention_days": {
+            "type": "number",
+            "default": 30,
+            "description": "Days to keep historical reports"
+          },
+          "format": {
+            "type": "string",
+            "enum": ["narrative", "structured", "summary"],
+            "default": "narrative",
+            "description": "Report output format"
+          },
+          "webhook_url": {
+            "type": "string",
+            "description": "Webhook URL for report push notifications"
+          }
+        }
       }
     }
   }
