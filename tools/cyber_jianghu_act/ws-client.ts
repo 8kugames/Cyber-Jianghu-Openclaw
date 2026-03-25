@@ -410,30 +410,42 @@ export async function getWsClientAsync(
 	isConnecting = true;
 
 	try {
-		// Reset any existing client before creating a new one
 		if (globalWsClient) {
 			globalWsClient.disconnect();
 			globalWsClient = null;
 		}
 
-		const { discoverPort } = await import("./http-client.js");
+		const { discoverPort, getDiscoveredAgentInfo, setDiscoveredAgentInfo, DEFAULT_HTTP_CONFIG } = await import("./http-client.js");
 
-		// Discover port if needed
-		let targetPort = port;
-		if (targetPort === 0) {
-			const discovered = await discoverPort(host);
-			if (!discovered) {
-				throw new Error("No agent found in port range 23340-23349");
+		let targetHost: string;
+		let targetPort: number;
+
+		// WebSocket MUST connect to the same agent that HTTP discovered
+		// This prevents the two clients from connecting to different agent instances
+		if (port !== 0) {
+			targetPort = port;
+			targetHost = host ||
+				process.env.DOCKER_AGENT_HOST ||
+				"host.docker.internal";
+		} else {
+			const discoveredInfo = getDiscoveredAgentInfo();
+			if (discoveredInfo) {
+				console.log(`[ws-client] Reusing HTTP discovered agent at ${discoveredInfo.host}:${discoveredInfo.port}`);
+				targetHost = discoveredInfo.host;
+				targetPort = discoveredInfo.port;
+			} else {
+				targetHost = host ||
+					process.env.DOCKER_AGENT_HOST ||
+					"host.docker.internal";
+				const discovered = await discoverPort(targetHost, DEFAULT_HTTP_CONFIG);
+				if (!discovered) {
+					throw new Error(`No agent found in port range ${DEFAULT_HTTP_CONFIG.portRange.min}-${DEFAULT_HTTP_CONFIG.portRange.max}`);
+				}
+				targetPort = discovered;
+				setDiscoveredAgentInfo(targetHost, targetPort);
 			}
-			targetPort = discovered;
 		}
 
-		// Determine host:
-		const targetHost = host ||
-			process.env.DOCKER_AGENT_HOST ||
-			"host.docker.internal";
-
-		// Create client
 		globalWsClient = new WsClient({
 			host: targetHost,
 			port: targetPort,

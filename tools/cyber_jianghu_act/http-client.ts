@@ -167,6 +167,7 @@ export class HttpClient {
 // Global HTTP client cache
 const clientCache: Map<string, HttpClient> = new Map();
 let discoveredPort: number | null = null;
+let discoveredHost: string | null = null;
 
 /**
  * Get or create HTTP client (async version)
@@ -180,12 +181,14 @@ export async function getHttpClientAsync(
 	config?: Partial<HttpClientConfig>,
 ): Promise<HttpClient> {
 	const cfg = { ...DEFAULT_HTTP_CONFIG, ...config };
-	const targetHost = host || cfg.defaultHost;
 
 	// 如果 port 为 0，自动发现端口
 	if (port === 0) {
 		if (discoveredPort === null) {
-			discoveredPort = await discoverPort(targetHost, cfg);
+			// 传递 host（可能为 undefined），让 discoverPort 使用其 fallback 链
+			discoveredPort = await discoverPort(host, cfg);
+			// discoverPort 内部解析 host，存储解析后的值用于 HTTP 请求
+			discoveredHost = host || process.env.DOCKER_AGENT_HOST || "host.docker.internal";
 			if (discoveredPort === null) {
 				throw new Error(
 					`No agent HTTP API found in port range ${cfg.portRange.min}-${cfg.portRange.max}`
@@ -195,19 +198,43 @@ export async function getHttpClientAsync(
 		port = discoveredPort;
 	}
 
-	const key = `${targetHost}:${port}`;
+	const resolvedHost = discoveredHost || host || cfg.defaultHost;
+	const key = `${resolvedHost}:${port}`;
 
 	if (!clientCache.has(key)) {
 		console.log(`[http-client] Creating new HTTP client for ${key}`);
-		clientCache.set(key, new HttpClient(port, targetHost, cfg.requestTimeoutMs));
+		clientCache.set(key, new HttpClient(port, resolvedHost, cfg.requestTimeoutMs));
 	}
 
 	return clientCache.get(key)!;
 }
 
 /**
- * Reset discovered port (useful for testing)
+ * Get the discovered agent host (for WebSocket client to use)
+ *
+ * WebSocket should connect to the same agent that HTTP discovered
+ */
+export function getDiscoveredAgentInfo(): { host: string; port: number } | null {
+	if (discoveredPort === null || discoveredHost === null) {
+		return null;
+	}
+	return { host: discoveredHost, port: discoveredPort };
+}
+
+/**
+ * Set the discovered agent info (called by WebSocket client after its own discovery)
+ *
+ * This ensures HTTP and WebSocket share the same discovery result
+ */
+export function setDiscoveredAgentInfo(host: string, port: number): void {
+	discoveredHost = host;
+	discoveredPort = port;
+}
+
+/**
+ * Reset discovered port and host (useful for testing)
  */
 export function resetDiscovery(): void {
 	discoveredPort = null;
+	discoveredHost = null;
 }
