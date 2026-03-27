@@ -1,4 +1,3 @@
-/// <reference types="node" />
 // tools/act/http-client.ts
 // ============================================================================
 // Simplified HTTP Client for Cyber-Jianghu-Openclaw Plugin
@@ -168,7 +167,7 @@ export async function getHttpClient(
 
 	const cfg = { ...DEFAULT_CONFIG, ...config };
 	const host =
-		(typeof process !== 'undefined' && process.env?.DOCKER_AGENT_HOST) || cfg.defaultHost;
+		(typeof globalThis !== 'undefined' && (globalThis as any).__DOCKER_AGENT_HOST) || cfg.defaultHost;
 
 	// Use cached agent info if available
 	if (cachedAgentInfo) {
