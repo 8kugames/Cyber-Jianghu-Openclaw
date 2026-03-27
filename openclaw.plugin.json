@@ -1,120 +1,61 @@
 {
   "id": "cyber-jianghu-openclaw",
-  "name": "cyber-jianghu-openclaw",
-  "version": "0.2.0",
-  "description": "Cyber-Jianghu Agent - OpenClaw integration for MMO-MAS game",
-  "author": "8kugames",
-  "license": "MIT-0",
-  "homepage": "https://github.com/8kugames/Cyber-Jianghu-Openclaw",
+  "name": "Cyber Jianghu OpenClaw",
+  "description": "LLM agent plugin for Cyber-Jianghu MMO game — autonomous character with daily reports and dream injection",
+  "version": "0.3.0",
   "skills": ["./"],
-  "entry": "./register.ts",
-  "hooks": [
-    "./hooks/cyber-jianghu-openclaw-bootstrap"
-  ],
   "configSchema": {
     "type": "object",
-    "additionalProperties": false,
     "properties": {
       "localApiPort": {
         "type": "number",
         "default": 0,
-        "description": "Port for agent HTTP API (0 = auto-discover from 23340-23349 range)"
+        "description": "Agent API port (0 = auto-discover 23340-23349)"
       },
       "localApiHost": {
         "type": "string",
-        "default": "127.0.0.1",
-        "description": "Host for agent HTTP API"
+        "default": "127.0.0.1"
       },
       "gameServerUrl": {
         "type": "string",
-        "default": "http://47.102.120.116:23333",
-        "description": "Game server URL for agent registration (default: official test server)"
+        "default": "http://47.102.120.116:23333"
       },
       "headless": {
         "type": "boolean",
-        "default": false,
-        "description": "Run in headless mode (skip interactive prompts, use config/env vars)"
+        "default": false
+      },
+      "reportChannel": {
+        "type": "string",
+        "description": "Channel ID for daily reports (e.g. 'telegram:chat_123')"
+      },
+      "reportDelivery": {
+        "type": "string",
+        "enum": ["announce", "webhook", "none"],
+        "default": "announce"
+      },
+      "reportWebhookUrl": {
+        "type": "string",
+        "description": "Webhook URL if delivery=webhook"
       },
       "character": {
         "type": "object",
-        "description": "Character configuration for pre-birth setup",
         "properties": {
-          "name": {
-            "type": "string",
-            "description": "Character name (required for registration)"
-          },
-          "age": {
-            "type": "number",
-            "minimum": 1,
-            "maximum": 100,
-            "description": "Character age"
-          },
-          "gender": {
-            "type": "string",
-            "enum": ["male", "female", "other"],
-            "description": "Character gender"
-          },
-          "appearance": {
-            "type": "string",
-            "description": "Character appearance description"
-          },
-          "identity": {
-            "type": "string",
-            "description": "Character identity/role in the world"
-          },
-          "personality": {
-            "type": "array",
-            "items": { "type": "string" },
-            "description": "Character personality traits"
-          },
-          "values": {
-            "type": "array",
-            "items": { "type": "string" },
-            "description": "Character core values"
-          },
-          "language_style": {
-            "type": "string",
-            "description": "Character speaking style"
-          },
-          "goals": {
-            "type": "array",
-            "items": { "type": "string" },
-            "description": "Character short/long term goals"
-          },
-          "backstory": {
-            "type": "string",
-            "description": "Character background story"
-          }
-        },
-        "required": ["name", "age", "gender"]
-      },
-      "report": {
-        "type": "object",
-        "description": "Hourly report configuration",
-        "properties": {
-          "frequency": {
-            "type": "string",
-            "enum": ["30m", "1h", "2h"],
-            "default": "1h",
-            "description": "Report generation frequency"
-          },
-          "retention_days": {
-            "type": "number",
-            "default": 30,
-            "description": "Days to keep historical reports"
-          },
-          "format": {
-            "type": "string",
-            "enum": ["narrative", "structured", "summary"],
-            "default": "narrative",
-            "description": "Report output format"
-          },
-          "webhook_url": {
-            "type": "string",
-            "description": "Webhook URL for report push notifications"
-          }
+          "name": { "type": "string" },
+          "age": { "type": "number", "minimum": 1, "maximum": 100 },
+          "gender": { "type": "string", "enum": ["male", "female", "other"] },
+          "appearance": { "type": "string" },
+          "identity": { "type": "string" },
+          "personality": { "type": "array", "items": { "type": "string" } },
+          "values": { "type": "array", "items": { "type": "string" } },
+          "language_style": { "type": "string" },
+          "short_term_goal": { "type": "string" },
+          "long_term_goal": { "type": "string" },
+          "backstory": { "type": "string" }
         }
       }
     }
+  },
+  "contracts": {
+    "tools": ["cyber_jianghu_act", "cyber_jianghu_dream"]
   }
 }

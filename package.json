@@ -1,6 +1,6 @@
 {
   "name": "@8kugames/cyber-jianghu-openclaw",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Cyber-Jianghu Agent - OpenClaw integration for MMO-MAS game",
   "author": "8kugames",
   "license": "MIT-0",
@@ -32,12 +32,10 @@
     "openclaw.plugin.json"
   ],
   "openclaw": {
-    "extensions": [
-      "./register.ts"
-    ],
-    "hooks": [
-      "./hooks/cyber-jianghu-openclaw-bootstrap"
-    ]
+    "extensions": ["./register.ts"],
+    "compat": {
+      "pluginApi": "^1.0.0"
+    }
   },
   "peerDependencies": {
     "openclaw": "^2026.3.13"
