@@ -1,3 +1,4 @@
+/// <reference types="node" />
 // tools/act/http-client.ts
 // ============================================================================
 // Simplified HTTP Client for Cyber-Jianghu-Openclaw Plugin
