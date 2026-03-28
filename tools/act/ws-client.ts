@@ -21,10 +21,10 @@ import type {
 	AgentDiedMessage,
 	GameRulesUpdateMessage,
 	WorldBuildingRulesUpdateMessage,
-	ReviewRequestMessage,
 	MissedMessagesMessage,
 	IntentPayload,
-	ReviewResultPayload,
+	LLMRequestMessage,
+	LLMResponsePayload,
 } from "./types.js";
 
 // ============================================================================
@@ -73,6 +73,7 @@ export interface WsClientHandlers {
 	onAgentDied?: (msg: AgentDiedMessage) => void;
 	onGameRulesUpdate?: (msg: GameRulesUpdateMessage) => void;
 	onWorldBuildingRulesUpdate?: (msg: WorldBuildingRulesUpdateMessage) => void;
+	onLLMRequest?: (msg: LLMRequestMessage) => void;
 }
 
 // ============================================================================
@@ -219,19 +220,13 @@ export class WsClient {
 		this.sendRaw(msg);
 	}
 
-	/** Submit a review result (used by auto-approve for review_request messages). */
-	sendReviewResult(
-		tickId: number,
-		decision: "approved" | "rejected" | "needs_modification",
-		reason?: string,
-		narrative?: string,
-	): void {
-		const msg: ReviewResultPayload = {
-			type: "review_result",
-			tick_id: tickId,
-			decision,
-			...(reason !== undefined && { reason }),
-			...(narrative !== undefined && { narrative }),
+	/** Send LLM response back to the Agent. */
+	sendLLMResponse(requestId: string, content: string, error?: string): void {
+		const msg: LLMResponsePayload = {
+			type: "llm_response",
+			request_id: requestId,
+			content,
+			...(error !== undefined && { error }),
 		};
 		this.sendRaw(msg);
 	}
@@ -250,6 +245,7 @@ export class WsClient {
 	set onAgentDiedHandler(fn: ((msg: AgentDiedMessage) => void) | undefined) { this.handlers.onAgentDied = fn; }
 	set onGameRulesUpdateHandler(fn: ((msg: GameRulesUpdateMessage) => void) | undefined) { this.handlers.onGameRulesUpdate = fn; }
 	set onWorldBuildingRulesUpdateHandler(fn: ((msg: WorldBuildingRulesUpdateMessage) => void) | undefined) { this.handlers.onWorldBuildingRulesUpdate = fn; }
+	set onLLMRequestHandler(fn: ((msg: LLMRequestMessage) => void) | undefined) { this.handlers.onLLMRequest = fn; }
 
 	// -----------------------------------------------------------------------
 	// Private: message dispatch
@@ -306,11 +302,6 @@ export class WsClient {
 				this.handlers.onWorldBuildingRulesUpdate?.(msg as unknown as WorldBuildingRulesUpdateMessage);
 				break;
 
-			// --- review ---
-			case "review_request":
-				this.autoApproveReview(msg as unknown as ReviewRequestMessage);
-				break;
-
 			// --- recovery ---
 			case "missed_messages": {
 				const mm = msg as unknown as MissedMessagesMessage;
@@ -320,23 +311,14 @@ export class WsClient {
 				break;
 			}
 
+			// --- llm integration ---
+			case "llm_request":
+				this.handlers.onLLMRequest?.(msg as unknown as LLMRequestMessage);
+				break;
+
 			default:
 				console.warn(`[ws-client] Unhandled downstream type: ${type}`);
 		}
-	}
-
-	// -----------------------------------------------------------------------
-	// Private: review auto-approve
-	// -----------------------------------------------------------------------
-	// Note: The Agent sends review_request messages as part of its dual-soul
-	// review system. This plugin auto-approves all reviews since OpenClaw acts
-	// as a pure LLM provider, not an observer/enforcer.
-
-	private autoApproveReview(req: ReviewRequestMessage): void {
-		console.log(
-			`[ws-client] Auto-approving review_request for tick ${req.tick_id}`,
-		);
-		this.sendReviewResult(req.tick_id, "approved", "auto-approved by OpenClaw plugin");
 	}
 
 	// -----------------------------------------------------------------------

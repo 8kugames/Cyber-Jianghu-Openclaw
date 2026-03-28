@@ -7,35 +7,9 @@
   "configSchema": {
     "type": "object",
     "properties": {
-      "localApiPort": {
-        "type": "number",
-        "default": 0,
-        "description": "Agent API port (0 = auto-discover 23340-23349)"
-      },
-      "localApiHost": {
-        "type": "string",
-        "default": "127.0.0.1"
-      },
-      "gameServerUrl": {
-        "type": "string",
-        "default": "http://47.102.120.116:23333"
-      },
       "headless": {
         "type": "boolean",
         "default": false
-      },
-      "reportChannel": {
-        "type": "string",
-        "description": "Channel ID for daily reports (e.g. 'telegram:chat_123')"
-      },
-      "reportDelivery": {
-        "type": "string",
-        "enum": ["announce", "webhook", "none"],
-        "default": "announce"
-      },
-      "reportWebhookUrl": {
-        "type": "string",
-        "description": "Webhook URL if delivery=webhook"
       },
       "character": {
         "type": "object",
@@ -55,6 +29,10 @@
     }
   },
   "contracts": {
-    "tools": ["cyber_jianghu_act", "cyber_jianghu_dream"]
+    "tools": [
+      "cyber_jianghu_context",
+      "cyber_jianghu_act",
+      "cyber_jianghu_dream"
+    ]
   }
 }

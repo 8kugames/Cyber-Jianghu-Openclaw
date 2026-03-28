@@ -175,24 +175,6 @@ export interface CognitiveContext {
 }
 
 // ============================================================================
-// Review types (used by WS protocol — review_request is auto-approved)
-// ============================================================================
-
-/** Player intent forwarded for review. */
-export interface WsPlayerIntent {
-  action_type: string;
-  action_data?: unknown;
-  thought_log?: string;
-}
-
-/** Persona summary sent alongside review requests (WS protocol). */
-export interface PersonaSummary {
-  name: string;
-  personality: string[];
-  values: string[];
-}
-
-// ============================================================================
 // Downstream messages (Agent -> OpenClaw)
 // ============================================================================
 
@@ -273,16 +255,6 @@ export interface WorldBuildingRulesUpdateMessage {
   last_updated: string;
 }
 
-/** Review request sent to an Observer agent. */
-export interface ReviewRequestMessage {
-  type: 'review_request';
-  tick_id: number;
-  player_intent: WsPlayerIntent;
-  persona_summary: PersonaSummary;
-  world_context: string;
-  deadline_ms: number;
-}
-
 /** Notification that some messages were lost (lagged receiver). */
 export interface MissedMessagesMessage {
   type: 'missed_messages';
@@ -299,8 +271,15 @@ export type DownstreamMessage =
   | ServerErrorMessage
   | GameRulesUpdateMessage
   | WorldBuildingRulesUpdateMessage
-  | ReviewRequestMessage
-  | MissedMessagesMessage;
+  | MissedMessagesMessage
+  | LLMRequestMessage;
+
+/** LLM request from the Agent's cognitive engine. */
+export interface LLMRequestMessage {
+  type: 'llm_request';
+  request_id: string;
+  prompt: string;
+}
 
 // ============================================================================
 // Upstream messages (OpenClaw -> Agent)
@@ -315,13 +294,12 @@ export interface IntentPayload {
   thought_log?: string;
 }
 
-/** Review result payload (from Observer agent). */
-export interface ReviewResultPayload {
-  type: 'review_result';
-  tick_id: number;
-  decision: 'approved' | 'rejected' | 'needs_modification';
-  reason?: string;
-  narrative?: string;
+/** LLM response sent back to the Agent. */
+export interface LLMResponsePayload {
+  type: 'llm_response';
+  request_id: string;
+  content: string;
+  error?: string;
 }
 
 // ============================================================================
