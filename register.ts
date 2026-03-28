@@ -5,12 +5,11 @@
 //
 // This module:
 //   1. Connects to the Rust Agent via WebSocket
-//   2. Registers act/dream tools for the LLM
-//   3. Routes tick → CONTEXT.md + reporter
+//   2. Registers context/act/dream tools for the LLM
+//   3. Routes tick → in-memory context snapshot + reporter
 //   4. Submits pending intents on agent_end
 // ============================================================================
 
-import { promises as fs } from "fs";
 import { Type } from "@sinclair/typebox";
 import { WsClient } from "./tools/act/ws-client.js";
 import { getHttpClient, getAgentInfo } from "./tools/act/http-client.js";
@@ -20,6 +19,7 @@ import type {
 	ServerErrorMessage,
 	ServerDialogueMessage,
 	GameActionParams,
+	LLMRequestMessage,
 } from "./tools/act/types.js";
 import { Reporter } from "./plugins/reporter/index.js";
 
@@ -35,6 +35,7 @@ interface PluginAPI {
 		options?: unknown,
 	): void;
 	config?: Record<string, unknown>;
+	executePrompt?: (prompt: string) => Promise<string>;
 }
 
 interface ToolDefinition {
@@ -59,9 +60,15 @@ interface ToolResult {
 let wsClient: WsClient | null = null;
 let reporter: Reporter | null = null;
 let lastGameActionCall: GameActionParams | null = null;
-let currentTickId = 0;
-let lastWrittenTickId = 0;
 let isInitializing = false;
+let globalPluginApi: PluginAPI | null = null;
+let latestTickSnapshot: {
+	tickId: number;
+	deadlineMs: number;
+	context: string | null;
+	cognitiveContext: TickMessage["cognitive_context"] | null;
+	updatedAt: string;
+} | null = null;
 
 // ---------------------------------------------------------------------------
 // Plugin entry point
@@ -73,18 +80,66 @@ export default async function register(api: PluginAPI): Promise<void> {
 		return;
 	}
 	isInitializing = true;
+	globalPluginApi = api;
 
 	// 1. Reporter
 	reporter = new Reporter();
 
-	// 2. Register act tool
+	// 2. Register context tool
+	api.registerTool({
+		name: "cyber_jianghu_context",
+		description:
+			"获取当前 Tick 的最新上下文快照（来自 WS 实时消息）。决策前优先调用此工具，再调用 cyber_jianghu_act。",
+		parameters: Type.Object({}),
+		execute: async () => {
+			if (!latestTickSnapshot) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify(
+								{
+									status: "unavailable",
+									message: "尚未收到 Tick，请等待下一次世界状态更新。",
+								},
+								null,
+								2,
+							),
+						},
+					],
+					isError: true,
+				};
+			}
+			return {
+				content: [
+					{
+						type: "text",
+						text: JSON.stringify(
+							{
+								status: "ok",
+								tick_id: latestTickSnapshot.tickId,
+								deadline_ms: latestTickSnapshot.deadlineMs,
+								context: latestTickSnapshot.context,
+								cognitive_context: latestTickSnapshot.cognitiveContext,
+								updated_at: latestTickSnapshot.updatedAt,
+							},
+							null,
+							2,
+						),
+					},
+				],
+			};
+		},
+	});
+
+	// 3. Register act tool
 	api.registerTool({
 		name: "cyber_jianghu_act",
 		description:
-			"提交游戏动作到赛博江湖世界。你必须每个 Tick 调用这个工具。可用动作请参考 CONTEXT.md 中的 available_actions 字段。",
+			"提交游戏动作到赛博江湖世界。你必须每个 Tick 调用这个工具。可用动作请先通过 cyber_jianghu_context 获取。",
 		parameters: Type.Object({
 			action: Type.String({
-				description: "动作类型（从 CONTEXT.md 的 available_actions 中选择）",
+				description: "动作类型（从 cyber_jianghu_context 返回的 available_actions 中选择）",
 			}),
 			target: Type.Optional(
 				Type.String({ description: "目标实体/物品/地点的ID" }),
@@ -109,7 +164,7 @@ export default async function register(api: PluginAPI): Promise<void> {
 		},
 	});
 
-	// 3. Register dream tool
+	// 4. Register dream tool
 	api.registerTool({
 		name: "cyber_jianghu_dream",
 		description:
@@ -159,13 +214,11 @@ export default async function register(api: PluginAPI): Promise<void> {
 		},
 	});
 
-	// 4. Init WebSocket
+	// 5. Init WebSocket
 	await initWebSocket();
 
-	// 5. agent_end hook — submit pending intent
+	// 6. agent_end hook
 	api.on("agent_end", async () => {
-		submitPendingIntent();
-
 		// Check for pending report from reporter
 		const pending = reporter?.getPendingReport();
 		if (pending) {
@@ -201,12 +254,15 @@ async function initWebSocket(): Promise<void> {
 
 		// Tick handler — wrap async to prevent silent rejection in void callback
 		wsClient.onTickHandler = (msg: TickMessage) => {
-			currentTickId = msg.tick_id;
+			latestTickSnapshot = {
+				tickId: msg.tick_id,
+				deadlineMs: msg.deadline_ms,
+				context: msg.context ?? null,
+				cognitiveContext: msg.cognitive_context ?? null,
+				updatedAt: new Date().toISOString(),
+			};
 			Promise.resolve()
 				.then(async () => {
-					if (msg.context) {
-						await writeContextMd(msg.context, msg.tick_id);
-					}
 					await reporter?.onTick(msg);
 				})
 				.catch((e) => console.error("[cyber-jianghu] Tick handler error:", e));
@@ -237,71 +293,38 @@ async function initWebSocket(): Promise<void> {
 			);
 		};
 
+		// LLM Request handler
+		wsClient.onLLMRequestHandler = async (msg: LLMRequestMessage) => {
+			console.log(`[cyber-jianghu] Received LLMRequest: ${msg.request_id}`);
+			
+			if (!globalPluginApi || !wsClient?.isConnected()) {
+				console.warn(`[cyber-jianghu] Plugin API unavailable or WS disconnected, dropping LLMRequest: ${msg.request_id}`);
+				return;
+			}
+
+			try {
+				// Use the context tool as a gateway to the system LLM via prompt text
+				// Actually we should use api object from register, let's inject it via closure or global
+				const result = await globalPluginApi.executePrompt?.(msg.prompt);
+				if (result) {
+					wsClient.sendLLMResponse(msg.request_id, result);
+				} else {
+					throw new Error("No response from LLM");
+				}
+			} catch (e) {
+				const errorMsg = e instanceof Error ? e.message : String(e);
+				console.error(`[cyber-jianghu] LLMRequest failed: ${errorMsg}`);
+				if (wsClient?.isConnected()) {
+					wsClient.sendLLMResponse(msg.request_id, "", errorMsg);
+				}
+			}
+		};
+
 		await wsClient.connect();
 		console.log("[cyber-jianghu] WebSocket connected to Agent");
 	} catch (e) {
 		console.error("[cyber-jianghu] Failed to connect to Agent:", e);
 	} finally {
 		isInitializing = false;
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Intent submission (called from agent_end hook)
-// ---------------------------------------------------------------------------
-
-function submitPendingIntent(): void {
-	if (!wsClient?.isConnected()) return;
-
-	if (lastGameActionCall && currentTickId > 0) {
-		const actionData =
-			lastGameActionCall.target || lastGameActionCall.data
-				? {
-						target: lastGameActionCall.target,
-						data: lastGameActionCall.data,
-					}
-				: undefined;
-
-		wsClient.sendIntent(
-			currentTickId,
-			lastGameActionCall.action,
-			actionData,
-			lastGameActionCall.reasoning,
-		);
-		console.log(
-			`[cyber-jianghu] Intent submitted: ${lastGameActionCall.action} for tick ${currentTickId}`,
-		);
-	} else if (currentTickId > 0) {
-		// LLM didn't call act → submit idle
-		wsClient.sendIntent(
-			currentTickId,
-			"idle",
-			undefined,
-			"LLM did not call jianghu_act",
-		);
-		console.log(
-			`[cyber-jianghu] Idle submitted for tick ${currentTickId}`,
-		);
-	}
-
-	lastGameActionCall = null;
-}
-
-// ---------------------------------------------------------------------------
-// CONTEXT.md writer
-// ---------------------------------------------------------------------------
-
-async function writeContextMd(context: string, tickId: number): Promise<void> {
-	if (tickId <= lastWrittenTickId) return;
-
-	const workspaceDir = "/home/node/workspace";
-	try {
-		await fs.writeFile(`${workspaceDir}/CONTEXT.md`, context, "utf-8");
-		lastWrittenTickId = tickId;
-		console.log(
-			`[cyber-jianghu] CONTEXT.md updated for tick ${tickId}`,
-		);
-	} catch (e) {
-		console.error("[cyber-jianghu] Failed to write CONTEXT.md:", e);
 	}
 }

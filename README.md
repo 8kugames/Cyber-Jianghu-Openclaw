@@ -6,8 +6,8 @@ Cyber-Jianghu (赛博江湖) OpenClaw Plugin — LLM 提供者 + 用户通讯桥
 
 v0.3.0 重构后的插件定位：
 
-- **LLM 提供者** — 通过 WebSocket 连接 Rust Agent，接收 Tick 数据，LLM 决策后提交 Intent
-- **用户通讯桥梁** — 每游戏日推送叙事报告到 IM 渠道（微信/Discord/Telegram）
+- **LLM 提供者** — 通过 WebSocket 连接 Rust Agent，接收 Tick 数据并提供 LLM 推理能力
+- **日志记录** — 当前版本默认输出报告到运行日志
 - **有限干预** — 用户通过"托梦"进行每游戏日 1 次的有限干预（最多 5 Tick）
 
 ## 架构
@@ -57,13 +57,35 @@ curl http://localhost:23340/api/v1/health
 
 ## 快速开始
 
-1. 确保 Agent 已在 23340-23349 端口运行
-2. 配置角色信息（环境变量或交互式向导）
-3. 在 OpenClaw 中启用插件
+### 1. 以 Claw 模式启动 Agent（必须）
+
+```bash
+cyber-jianghu-agent run --mode claw --port 23340
+```
+
+> 必须使用 `--mode claw`（或 `CYBER_JIANGHU_RUNTIME_MODE=claw`）。`cognitive` 模式不会开启 OpenClaw 所需的 WS 控制链路。
+
+### 2. 启用插件
 
 ```bash
 openclaw plugins enable cyber-jianghu-openclaw
 ```
+
+### 3. 创建 OpenClaw Agent 配置
+
+```bash
+cp templates/player-agent.json5 ~/.openclaw/agents/my-agent.json5
+```
+
+这一步不需要你手工做角色创建。角色信息由 OpenClaw 在 `agent:bootstrap` 阶段与用户交互收集并自动注册。
+
+### 4. 启动 OpenClaw Agent 并完成角色初始化
+
+启动你在 OpenClaw 中的该 Agent 实例后，会触发 `agent:bootstrap`：
+
+- 已有 `character` 配置或 `CHARACTER_*` 环境变量时：自动注册角色
+- 无预设配置且为交互终端时：进入角色向导
+- `HEADLESS=true` 且无角色配置时：启动失败（Fail Fast）
 
 ## 核心功能
 
@@ -71,7 +93,8 @@ openclaw plugins enable cyber-jianghu-openclaw
 
 | 工具 | 描述 |
 |------|------|
-| `cyber_jianghu_act` | 每个 Tick 必须调用，提交游戏动作 |
+| `cyber_jianghu_context` | 获取当前 Tick 的实时上下文快照（决策前必调） |
+| `cyber_jianghu_act` | 仅作日志记录，实际意图由 Agent 内置引擎提交 |
 | `cyber_jianghu_dream` | 托梦干预，每游戏日 1 次，最多 5 Tick |
 
 ### Hook
@@ -82,16 +105,14 @@ openclaw plugins enable cyber-jianghu-openclaw
 
 ### 日报
 
-每游戏日（约 24 分钟现实时间）自动生成武侠小说风格的叙事报告，推送到用户 IM 渠道。
+每游戏日（约 24 分钟现实时间）自动生成武侠风格叙事报告，当前版本默认输出到运行日志。
 
 ## 配置
 
 参见 `templates/.env.example` 和 `openclaw.plugin.json`。
 
 关键配置项：
-- `localApiPort` — Agent 端口（0 = 自动发现 23340-23349）
-- `reportChannel` — 日报推送渠道 ID
-- `reportDelivery` — 推送方式（announce/webhook/none）
+
 - `character` — 角色设定（首次运行可通过交互式向导配置）
 
 ## 文档
