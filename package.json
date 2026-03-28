@@ -32,7 +32,9 @@
     "openclaw.plugin.json"
   ],
   "openclaw": {
-    "extensions": ["./register.ts"],
+    "extensions": [
+      "./register.ts"
+    ],
     "compat": {
       "pluginApi": "^1.0.0"
     }
@@ -53,6 +55,8 @@
     "registry": "https://registry.npmjs.org"
   },
   "devDependencies": {
+    "@sinclair/typebox": "^0.34.48",
+    "@types/node": "^25.5.0",
     "typescript": "^5.9.3",
     "vitest": "^3.0.0"
   }

@@ -15,14 +15,13 @@
 import { promises as fs } from "fs";
 import type { CharacterConfig, HookContext, HookEvent, PluginConfig } from "./types.js";
 import {
-	bootstrapCharacterConfig,
 	loadCharacterConfig,
 	validateCharacterConfig,
 	isHeadlessMode,
 } from "./prompts.js";
 
-// Re-export bootstrapCharacterConfig for external use
-export { bootstrapCharacterConfig };
+// Re-export loadCharacterConfig for external use
+export { loadCharacterConfig as bootstrapCharacterConfig };
 
 /**
  * Bootstrap character configuration

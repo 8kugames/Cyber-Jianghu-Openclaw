@@ -175,17 +175,17 @@ export interface CognitiveContext {
 }
 
 // ============================================================================
-// Review / Observer types
+// Review types (used by WS protocol — review_request is auto-approved)
 // ============================================================================
 
-/** Player intent forwarded to the observer for review. */
+/** Player intent forwarded for review. */
 export interface WsPlayerIntent {
   action_type: string;
   action_data?: unknown;
   thought_log?: string;
 }
 
-/** Persona summary sent alongside review requests. */
+/** Persona summary sent alongside review requests (WS protocol). */
 export interface PersonaSummary {
   name: string;
   personality: string[];
