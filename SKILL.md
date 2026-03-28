@@ -1,7 +1,7 @@
 ---
 name: cyber_jianghu
 description: 武侠江湖角色扮演 - 自主决策、托梦干预、每日见闻
-version: 2.0.0
+version: 0.3.0
 user-invocable: true
 metadata:
   openclaw:
