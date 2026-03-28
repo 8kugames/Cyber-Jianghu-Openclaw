@@ -18,6 +18,19 @@ Agent 是独立部署的服务，OpenClaw 通过 WebSocket 主动连接 Agent。
 
 ---
 
+## 运行模式
+
+Agent 有两种运行模式，通过 `--mode` 参数或 `CYBER_JIANGHU_RUNTIME_MODE` 环境变量指定：
+
+| 模式 | 说明 | WebSocket | 适用场景 |
+|------|------|-----------|---------|
+| `claw` | 等待外部调度器（OpenClaw）连接 | **开启** | **OpenClaw 集成（本文档）** |
+| `cognitive` | 内置 LLM 决策，独立运行 | 关闭 | 独立测试 / 自主模式 |
+
+**与 OpenClaw 集成时必须使用 `claw` 模式**，否则 Agent 不启动 WebSocket 服务，OpenClaw 无法连接。
+
+---
+
 ## Docker 部署拓扑
 
 ### 场景 A: 全 Docker 部署
@@ -80,24 +93,32 @@ OpenClaw 运行在本地，Agent 运行在 Docker 中。通过 `host.docker.inte
 
 ```bash
 # 创建持久化目录
-mkdir -p ~/cyber-jianghu-agent/data
+mkdir -p ~/cyber-jianghu-agent/config ~/cyber-jianghu-agent/data
 
 # 启动 Agent 容器
 docker run -d \
   --name cyber-jianghu-agent \
   --restart unless-stopped \
   -p 23340:23340 \
+  -v ~/cyber-jianghu-agent/config:/app/config \
   -v ~/cyber-jianghu-agent/data:/app/data \
-  -e GAME_SERVER_URL=http://47.102.120.116:23333 \
+  -e CYBER_JIANGHU_RUNTIME_MODE=claw \
+  -e CYBER_JIANGHU_SERVER_WS_URL=ws://47.102.120.116:23333/ws \
+  -e CYBER_JIANGHU_SERVER_HTTP_URL=http://47.102.120.116:23333 \
+  -e CYBER_JIANGHU_WS_ALLOW_EXTERNAL=1 \
   -e RUST_LOG=info \
-  ghcr.io/8kugames/cyber-jianghu-agent:latest \
-  run --mode http --port 23340
+  ghcr.io/8kugames/cyber-jianghu-agent:latest
 ```
 
 **关键点**：
-- **`-v ~/cyber-jianghu-agent/data:/app/data`**：将容器内的 `/app/data` 目录映射到宿主机的持久化目录，保存 `agent.yaml`（含 `auth_token`）和游戏存档
+- **`CYBER_JIANGHU_RUNTIME_MODE=claw`**：**必须设置**。默认模式为 `cognitive`（无 WebSocket），必须显式切换到 `claw` 模式才能与 OpenClaw 通信
+- **`-v .../config:/app/config`**：映射配置目录，保存 `agent.yaml`（含 `auth_token`）
+- **`-v .../data:/app/data`**：映射数据目录，保存 SQLite 数据库和游戏存档
+- **`CYBER_JIANGHU_WS_ALLOW_EXTERNAL=1`**：允许非 localhost 的 WebSocket 连接（Docker 场景必须）
 - **`--restart unless-stopped`**：容器异常退出后自动重启，保证长时间运行
 - **`-p 23340:23340`**：固定端口映射，避免随机分配导致 OpenClaw 无法连接
+
+> **注意**：Dockerfile 默认 CMD 为 `["./agent", "run", "--port", "23340"]`，端口通过 CMD 固定，模式通过环境变量覆盖。无需在 CMD 后追加参数。
 
 ### 方式二：直接部署（二进制）
 
@@ -118,20 +139,20 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=%h/.cyber-jianghu
-ExecStart=%h/.local/bin/cyber-jianghu-agent run --mode http --port 23340
+ExecStart=%h/.local/bin/cyber-jianghu-agent run --mode claw --port 23340
 Restart=unless-stopped
 RestartSec=5
 Environment=RUST_LOG=info
-
-# 持久化配置（auth_token 等）
-Environment=CYBER_JIANGHU_DATA_DIR=%h/.cyber-jianghu
+Environment=CYBER_JIANGHU_CONFIG_DIR=%h/.cyber-jianghu/config
+Environment=CYBER_JIANGHU_SERVER_WS_URL=ws://47.102.120.116:23333/ws
+Environment=CYBER_JIANGHU_SERVER_HTTP_URL=http://47.102.120.116:23333
 
 [Install]
 WantedBy=default.target
 EOF
 
 # 3. 创建数据目录
-mkdir -p ~/.cyber-jianghu
+mkdir -p ~/.cyber-jianghu/config ~/.cyber-jianghu/data
 
 # 4. 启用并启动
 systemctl --user daemon-reload
@@ -149,7 +170,7 @@ curl -L https://github.com/8kugames/Cyber-Jianghu/releases/latest/download/cyber
 install -m 755 cyber-jianghu-agent ~/.local/bin/
 
 # 2. 创建数据目录
-mkdir -p ~/.cyber-jianghu
+mkdir -p ~/.cyber-jianghu/config ~/.cyber-jianghu/data
 
 # 3. 创建 launchd plist
 cat > ~/Library/LaunchAgents/com.8kugames.cyber-jianghu-agent.plist << 'EOF'
@@ -164,7 +185,7 @@ cat > ~/Library/LaunchAgents/com.8kugames.cyber-jianghu-agent.plist << 'EOF'
         <string>/Users/YOUR_USERNAME/.local/bin/cyber-jianghu-agent</string>
         <string>run</string>
         <string>--mode</string>
-        <string>http</string>
+        <string>claw</string>
         <string>--port</string>
         <string>23340</string>
     </array>
@@ -174,8 +195,12 @@ cat > ~/Library/LaunchAgents/com.8kugames.cyber-jianghu-agent.plist << 'EOF'
     <dict>
         <key>RUST_LOG</key>
         <string>info</string>
-        <key>CYBER_JIANGHU_DATA_DIR</key>
-        <string>/Users/YOUR_USERNAME/.cyber-jianghu</string>
+        <key>CYBER_JIANGHU_CONFIG_DIR</key>
+        <string>/Users/YOUR_USERNAME/.cyber-jianghu/config</string>
+        <key>CYBER_JIANGHU_SERVER_WS_URL</key>
+        <string>ws://47.102.120.116:23333/ws</string>
+        <key>CYBER_JIANGHU_SERVER_HTTP_URL</key>
+        <string>http://47.102.120.116:23333</string>
     </dict>
     <key>RunAtLoad</key>
     <true/>
@@ -201,10 +226,13 @@ launchctl load ~/Library/LaunchAgents/com.8kugames.cyber-jianghu-agent.plist
 # 检查健康状态
 curl http://localhost:23340/api/v1/health
 
-# 预期响应: {"status":"ok"}
+# 预期响应:
+# {"status":"ok","agent_id":"<uuid-or-null>","tick_id":<number-or-null>}
 
 # 检查配置持久化
-cat ~/.cyber-jianghu/agent.yaml  # 或 Docker: docker exec cyber-jianghu-agent cat /app/data/agent.yaml
+cat ~/.cyber-jianghu/config/agent.yaml
+# Docker:
+# docker exec cyber-jianghu-agent cat /app/config/agent.yaml
 ```
 
 ---
@@ -236,9 +264,14 @@ docker run -d \
   --name cyber-jianghu-agent \
   --network cyber-jianghu-net \
   -p 23340:23340 \
+  -v ~/cyber-jianghu-agent/config:/app/config \
   -v ~/cyber-jianghu-agent/data:/app/data \
-  ghcr.io/8kugames/cyber-jianghu-agent:latest \
-  run --mode http --port 23340
+  -e CYBER_JIANGHU_RUNTIME_MODE=claw \
+  -e CYBER_JIANGHU_SERVER_WS_URL=ws://47.102.120.116:23333/ws \
+  -e CYBER_JIANGHU_SERVER_HTTP_URL=http://47.102.120.116:23333 \
+  -e CYBER_JIANGHU_WS_ALLOW_EXTERNAL=1 \
+  -e RUST_LOG=info \
+  ghcr.io/8kugames/cyber-jianghu-agent:latest
 
 # 3. 启动 OpenClaw
 docker run -d \
@@ -252,13 +285,27 @@ docker run -d \
 
 ---
 
+## 环境变量参考
+
+| 环境变量 | 用途 | 默认值 |
+|---------|------|--------|
+| `CYBER_JIANGHU_RUNTIME_MODE` | 运行模式（`claw` / `cognitive`） | `cognitive` |
+| `CYBER_JIANGHU_PORT` | HTTP API 端口（`0` = 23340-23349 随机） | `0` |
+| `CYBER_JIANGHU_SERVER_WS_URL` | 游戏服务器 WebSocket URL | `ws://localhost:23333/ws` |
+| `CYBER_JIANGHU_SERVER_HTTP_URL` | 游戏服务器 HTTP URL | `http://localhost:23333` |
+| `CYBER_JIANGHU_CONFIG_DIR` | 配置文件目录（内含 `agent.yaml`） | `~/.cyber-jianghu/config/` |
+| `CYBER_JIANGHU_WS_ALLOW_EXTERNAL` | 允许非 localhost WebSocket 连接 | 未设置（仅 localhost） |
+| `RUST_LOG` | 日志级别 | — |
+
+---
+
 ## 故障排除
 
 ### Agent 连接游戏服务器失败 (401 Unauthorized)
 
 ```bash
 # 1. 检查配置是否存在
-cat ~/.cyber-jianghu/agent.yaml
+cat ~/.cyber-jianghu/config/agent.yaml
 
 # 2. 如果配置丢失或令牌无效，需要重新注册
 # 调用注册接口（首次运行时会自动注册）
@@ -283,10 +330,10 @@ journalctl --user -u cyber-jianghu-agent -n 50
 docker logs cyber-jianghu-agent
 
 # 2. 检查持久化数据
-ls -la ~/.cyber-jianghu/
+ls -la ~/.cyber-jianghu/config/ ~/.cyber-jianghu/data/
 
-# 3. 如果数据损坏，删除后重新注册
-rm -rf ~/.cyber-jianghu/agent.yaml
+# 3. 如果配置损坏，删除后重新注册
+rm -rf ~/.cyber-jianghu/config/agent.yaml
 docker restart cyber-jianghu-agent
 ```
 
@@ -296,9 +343,30 @@ docker restart cyber-jianghu-agent
 # 查找占用进程
 lsof -i :23340
 
-# 或指定端口范围启动（0 = 自动选择）
-cyber-jianghu-agent run --mode http --port 0
+# 或指定端口范围启动（0 = 自动选择 23340-23349）
+cyber-jianghu-agent run --mode claw --port 0
 # OpenClaw 会自动扫描 23340-23349 找到可用端口
+```
+
+### OpenClaw 无法连接 Agent WebSocket
+
+```bash
+# 1. 确认 Agent 运行在 claw 模式（不是 cognitive）
+docker exec cyber-jianghu-agent printenv CYBER_JIANGHU_RUNTIME_MODE
+# 应输出: claw
+
+# 2. 确认 WebSocket 允许外部连接（Docker 场景）
+docker exec cyber-jianghu-agent printenv CYBER_JIANGHU_WS_ALLOW_EXTERNAL
+# 应输出: 1
+
+# 3. 测试 WebSocket 连接
+curl -i -N \
+  -H "Connection: Upgrade" \
+  -H "Upgrade: websocket" \
+  -H "Sec-WebSocket-Version: 13" \
+  -H "Sec-WebSocket-Key: test" \
+  http://localhost:23340/ws
+# 应返回 101 Switching Protocols
 ```
 
 ---
@@ -327,7 +395,7 @@ else
         echo "[$(date)] Attempting restart..."
         systemctl --user restart cyber-jianghu-agent 2>/dev/null || \
         docker restart cyber-jianghu-agent 2>/dev/null || \
-        ~/.local/bin/cyber-jianghu-agent run --mode http --port 23340 &
+        ~/.local/bin/cyber-jianghu-agent run --mode claw --port 23340 &
         sleep 3
     fi
     exit 1
@@ -338,10 +406,10 @@ fi
 
 ## 持久化要点总结
 
-| 组件 | 持久化内容 | 注意事项 |
-|------|-----------|---------|
-| `agent.yaml` | 设备认证令牌 `auth_token` | **必须持久化**，否则重启后需重新注册角色 |
-| 游戏存档 | 角色数据、关系、记忆 | 由 Agent 自动管理 |
-| OpenClaw | 不直接持久化 | 通过 Bootstrap Hook 从 Agent 获取状态 |
+| 组件 | 路径 | 持久化内容 | 注意事项 |
+|------|------|-----------|---------|
+| `agent.yaml` | `~/.cyber-jianghu/config/` | 设备认证令牌 `auth_token` | **必须持久化**，否则重启后需重新注册角色 |
+| SQLite 数据库 | `~/.cyber-jianghu/data/` | 角色数据、关系、记忆 | 由 Agent 自动管理 |
+| OpenClaw | — | 不直接持久化 | 通过 Bootstrap Hook 从 Agent 获取状态 |
 
 **关键**：如果 Agent 的 `auth_token` 丢失，需要通过 `/api/v1/character/register` 重新注册，可能需要管理员批准（托梦）。
