@@ -48,8 +48,7 @@
           "personality": { "type": "array", "items": { "type": "string" } },
           "values": { "type": "array", "items": { "type": "string" } },
           "language_style": { "type": "string" },
-          "short_term_goal": { "type": "string" },
-          "long_term_goal": { "type": "string" },
+          "goals": { "type": "array", "items": { "type": "string" } },
           "backstory": { "type": "string" }
         }
       }

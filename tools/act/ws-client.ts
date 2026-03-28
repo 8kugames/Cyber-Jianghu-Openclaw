@@ -219,7 +219,7 @@ export class WsClient {
 		this.sendRaw(msg);
 	}
 
-	/** Submit a review result (Observer agent). */
+	/** Submit a review result (used by auto-approve for review_request messages). */
 	sendReviewResult(
 		tickId: number,
 		decision: "approved" | "rejected" | "needs_modification",
@@ -328,6 +328,9 @@ export class WsClient {
 	// -----------------------------------------------------------------------
 	// Private: review auto-approve
 	// -----------------------------------------------------------------------
+	// Note: The Agent sends review_request messages as part of its dual-soul
+	// review system. This plugin auto-approves all reviews since OpenClaw acts
+	// as a pure LLM provider, not an observer/enforcer.
 
 	private autoApproveReview(req: ReviewRequestMessage): void {
 		console.log(
