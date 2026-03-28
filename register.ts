@@ -1,28 +1,38 @@
-// register.ts - Cyber-Jianghu OpenClaw Plugin Entry Point
+// register.ts — Cyber-Jianghu OpenClaw Plugin Entry Point
 // ============================================================================
-// This file is the main entry point for the Cyber-Jianghu OpenClaw plugin.
-// OpenClaw calls the register(api) function when the plugin is loaded.
-//
 // Architecture:
-//   OpenClaw (Brain) ←→ WebSocket ←→ Agent (Body) ←→ Game Server
+//   User (IM) ↕ OpenClaw (Brain) ←WS→ Agent (Body/Rust) ←WS→ Game Server
 //
-// WebSocket Integration:
-// - Connect to Agent's WebSocket endpoint on load
-// - Receive tick updates (WorldState + deadline)
-// - Submit intents via WebSocket
+// This module:
+//   1. Connects to the Rust Agent via WebSocket
+//   2. Registers act/dream tools for the LLM
+//   3. Routes tick → CONTEXT.md + reporter
+//   4. Submits pending intents on agent_end
 // ============================================================================
 
 import { promises as fs } from "fs";
+import { Type } from "@sinclair/typebox";
+import { WsClient } from "./tools/act/ws-client.js";
+import { getHttpClient, getAgentInfo } from "./tools/act/http-client.js";
+import type {
+	TickMessage,
+	AgentDiedMessage,
+	ServerErrorMessage,
+	ServerDialogueMessage,
+	GameActionParams,
+} from "./tools/act/types.js";
+import { Reporter } from "./plugins/reporter/index.js";
 
-/**
- * Plugin API type (minimal definition for type safety)
- */
+// ---------------------------------------------------------------------------
+// Plugin API types (minimal inline definitions)
+// ---------------------------------------------------------------------------
+
 interface PluginAPI {
 	registerTool(params: ToolDefinition): void;
 	on(
 		event: string,
-		handler: (event: any, context: any) => any | Promise<any>,
-		options?: any,
+		handler: (event: unknown, context: unknown) => unknown | Promise<unknown>,
+		options?: unknown,
 	): void;
 	config?: Record<string, unknown>;
 }
@@ -30,19 +40,11 @@ interface PluginAPI {
 interface ToolDefinition {
 	name: string;
 	description: string;
-	parameters: {
-		type: string;
-		properties: Record<
-			string,
-			{
-				type: string;
-				description: string;
-				enum?: string[];
-			}
-		>;
-		required: string[];
-	};
-	execute: (id: string, params: Record<string, unknown>) => Promise<ToolResult>;
+	parameters: unknown;
+	execute: (
+		_id: string,
+		params: Record<string, unknown>,
+	) => Promise<ToolResult>;
 }
 
 interface ToolResult {
@@ -50,210 +52,105 @@ interface ToolResult {
 	isError?: boolean;
 }
 
-// Store the last cyber_jianghu_act call for the enforcement hook
-let lastGameActionCall: { action: string; target?: string; data?: string; reasoning?: string } | null = null;
+// ---------------------------------------------------------------------------
+// Module-level state
+// ---------------------------------------------------------------------------
 
-// Shared state for WebSocket tick data
-interface SharedTickState {
-	tickId: number;
-	deadlineMs: number;
-	agentId: string;
-	state: any;
-	context?: string;
-}
-
-let sharedTickState: SharedTickState | null = null;
-let wsClient: any = null;
-let registerCallId = 0;
+let wsClient: WsClient | null = null;
+let reporter: Reporter | null = null;
+let lastGameActionCall: GameActionParams | null = null;
+let currentTickId = 0;
+let lastWrittenTickId = 0;
 let isInitializing = false;
 
-/**
- * Plugin entry point - called by OpenClaw when the plugin is loaded
- */
-export default async function register(api: PluginAPI) {
-	const callId = ++registerCallId;
-	console.log(`[cyber-jianghu-openclaw] register() called #${callId}`);
+// ---------------------------------------------------------------------------
+// Plugin entry point
+// ---------------------------------------------------------------------------
 
-	if (isInitializing) {
-		console.log(`[cyber-jianghu-openclaw] Initialization in progress, skipping #${callId}`);
+export default async function register(api: PluginAPI): Promise<void> {
+	if (isInitializing || wsClient) {
+		console.log("[cyber-jianghu] Already initialized, skipping");
 		return;
 	}
-	if (wsClient) {
-		console.log(`[cyber-jianghu-openclaw] Already initialized, skipping #${callId}`);
-		return;
-	}
-
 	isInitializing = true;
 
-	// Initialize WebSocket connection to Agent
-	await initWebSocket(api);
+	// 1. Reporter
+	reporter = new Reporter();
 
-	// Register cyber_jianghu_act tool
-	//
-	// 工具执行时只记录意图，实际的验证和提交由 agent_end hook 处理
-	// 这样可以集中处理验证逻辑、重试机制和记忆归档
+	// 2. Register act tool
 	api.registerTool({
 		name: "cyber_jianghu_act",
 		description:
 			"提交游戏动作到赛博江湖世界。你必须每个 Tick 调用这个工具。可用动作请参考 CONTEXT.md 中的 available_actions 字段。",
-		parameters: {
-			type: "object",
-			properties: {
-				action: {
-					type: "string",
-					description:
-						"动作类型（从 CONTEXT.md 的 available_actions 中选择）",
-				},
-				target: {
-					type: "string",
-					description: "目标实体/物品/地点的ID (可选)",
-				},
-				data: {
-					type: "string",
-					description: "额外数据，如说话内容、物品ID等 (可选)",
-				},
-				reasoning: {
-					type: "string",
-					description: "你的思考过程，解释为什么选择这个动作 (强烈建议)",
-				},
-			},
-			required: ["action"],
-		},
+		parameters: Type.Object({
+			action: Type.String({
+				description: "动作类型（从 CONTEXT.md 的 available_actions 中选择）",
+			}),
+			target: Type.Optional(
+				Type.String({ description: "目标实体/物品/地点的ID" }),
+			),
+			data: Type.Optional(
+				Type.String({ description: "额外数据，如说话内容、物品ID等" }),
+			),
+			reasoning: Type.Optional(
+				Type.String({ description: "你的思考过程，解释为什么选择这个动作" }),
+			),
+		}),
 		execute: async (_id, params) => {
-			// 存储工具调用供 enforcement hook 使用
-			lastGameActionCall = params as {
-				action: string;
-				target?: string;
-				data?: string;
-				reasoning?: string;
-			};
-
+			lastGameActionCall = params as unknown as GameActionParams;
 			console.log(
-				`[cyber_jianghu_act] Intent recorded: ${lastGameActionCall.action} ${lastGameActionCall.target || ""} ${lastGameActionCall.data || ""} (${lastGameActionCall.reasoning || ""})`,
+				`[cyber_jianghu_act] Intent recorded: ${lastGameActionCall.action} ${lastGameActionCall.target || ""} (${lastGameActionCall.reasoning || ""})`,
 			);
-
 			return {
 				content: [
-					{
-						type: "text",
-						text: `动作已记录: ${lastGameActionCall.action}`,
-					},
+					{ type: "text", text: `动作已记录: ${lastGameActionCall.action}` },
 				],
 			};
 		},
 	});
 
-	// Register cyber_jianghu_review tool
-	//
-	// Observer Agent 使用此工具审查 Player Agent 的意图
-	// 检查意图是否符合人设要求和武侠世界观
+	// 3. Register dream tool
 	api.registerTool({
-		name: "cyber_jianghu_review",
+		name: "cyber_jianghu_dream",
 		description:
-			"审查 Player Agent 的意图是否符合人设要求。Observer Agent 专用工具。用于获取待审查意图列表并提交审查决定。",
-		parameters: {
-			type: "object",
-			properties: {
-				action: {
-					type: "string",
-					enum: ["get_pending", "submit_review"],
-					description: "审查操作类型: get_pending=获取待审查列表, submit_review=提交审查决定",
-				},
-				intent_id: {
-					type: "string",
-					description: "意图ID (submit_review 时必填)",
-				},
-				decision: {
-					type: "string",
-					enum: ["approved", "rejected"],
-					description: "审查决定 (submit_review 时必填)",
-				},
-				reason: {
-					type: "string",
-					description: "审查理由 (submit_review 时必填)",
-				},
-				narrative: {
-					type: "string",
-					description: "叙事描述，仅批准时使用 (可选)",
-				},
-				player_api_url: {
-					type: "string",
-					description: "Player Agent HTTP API 地址 (默认: http://127.0.0.1:23340)",
-				},
-			},
-			required: ["action"],
-		},
+			"向角色注入一个梦（托梦），影响角色意识。用户每游戏日可干预一次，持续最多5个Tick。",
+		parameters: Type.Object({
+			content: Type.String({
+				description: "梦的内容——将出现在角色意识中的念头",
+			}),
+			duration: Type.Optional(
+				Type.Number({ description: "持续Tick数（最多5）", default: 5 }),
+			),
+		}),
 		execute: async (_id, params) => {
-			const action = params.action as string;
-			const playerApiUrl = (params.player_api_url as string) || "http://127.0.0.1:23340";
+			const duration = Math.min((params.duration as number) ?? 5, 5);
+			const content = params.content as string;
 
 			try {
-				const { ReviewHttpClient } = await import("./tools/cyber_jianghu_review/http-client.js");
-				const client = new ReviewHttpClient(playerApiUrl);
-
-				if (action === "get_pending") {
-					const pending = await client.getPendingReviews();
-					return {
-						content: [
-							{
-								type: "text",
-								text: JSON.stringify(pending, null, 2),
-							},
-						],
-					};
-				}
-
-				if (action === "submit_review") {
-					const intentId = params.intent_id as string;
-					const decision = params.decision as "approved" | "rejected";
-					const reason = params.reason as string;
-					const narrative = params.narrative as string | undefined;
-
-					if (!intentId || !decision || !reason) {
-						return {
-							content: [
-								{
-									type: "text",
-									text: "错误: submit_review 需要 intent_id, decision, 和 reason 参数",
-								},
-							],
-							isError: true,
-						};
-					}
-
-					const result = await client.submitReview(intentId, {
-						result: decision,
-						reason,
-						narrative,
-					});
-
-					return {
-						content: [
-							{
-								type: "text",
-								text: JSON.stringify(result, null, 2),
-							},
-						],
-					};
-				}
-
+				const httpClient = await getHttpClient();
+				await httpClient.post("/api/v1/character/dream", {
+					thought: content,
+					duration,
+				});
 				return {
 					content: [
 						{
 							type: "text",
-							text: `未知的审查操作: ${action}`,
+							text: `托梦成功注入。"${content}" 将影响角色 ${duration} 个Tick。`,
 						},
 					],
-					isError: true,
 				};
 			} catch (error) {
-				const errorMessage = error instanceof Error ? error.message : String(error);
-				console.error("[cyber_jianghu_review] Error:", errorMessage);
+				const msg = error instanceof Error ? error.message : String(error);
+				const isQuota =
+					msg.includes("429") || msg.includes("今日已使用过托梦");
 				return {
 					content: [
 						{
 							type: "text",
-							text: `审查操作失败: ${errorMessage}`,
+							text: isQuota
+								? `托梦失败: 今日已使用过托梦次数。(${msg})`
+								: `托梦失败: ${msg}`,
 						},
 					],
 					isError: true,
@@ -262,132 +159,149 @@ export default async function register(api: PluginAPI) {
 		},
 	});
 
-	// Register agent_end lifecycle hook (plugin hook, not internal hook)
-	//
-	// 这个 hook 在每次 agent 决策周期后运行
-	// 它确保 cyber_jianghu_act 被调用，并将意图提交到游戏服务器
-	api.on("agent_end", async (event, context) => {
-		// 优先使用 WebSocket 共享的 tick 状态
-		let tickId = sharedTickState?.tickId || 0;
-		let agentId = sharedTickState?.agentId || "unknown";
+	// 4. Init WebSocket
+	await initWebSocket();
 
-		// 如果没有 WebSocket tick 状态，从 HTTP API 获取
-		if (tickId === 0) {
-			try {
-				const { getHttpClientAsync } = await import("./tools/cyber_jianghu_act/http-client.js");
-				const client = await getHttpClientAsync(0);
-				const tickStatus = await client.get<{
-					tick_id: number;
-					agent_id: string;
-				}>("/api/v1/tick");
-				tickId = tickStatus.tick_id;
-				agentId = tickStatus.agent_id;
-				console.log(`[cyber-jianghu-openclaw] Current tick: ${tickId}, agent: ${agentId}`);
-			} catch (e) {
-				console.warn("[cyber-jianghu-openclaw] Failed to get tick status, using defaults:", e);
-			}
-		} else {
-			console.log(`[cyber-jianghu-openclaw] Using tick from WebSocket: ${tickId}`);
+	// 5. agent_end hook — submit pending intent
+	api.on("agent_end", async () => {
+		submitPendingIntent();
+
+		// Check for pending report from reporter
+		const pending = reporter?.getPendingReport();
+		if (pending) {
+			console.log(
+				`[cyber-jianghu] Pending ${pending.type} report available for delivery`,
+			);
+			// Report delivery: the report content is logged and available.
+			// In production, register.ts would schedule a cron job via the API
+			// to push this to the user's IM channel. For now, log it.
+			console.log(`[reporter] Report:\n${pending.content}`);
+			reporter?.clearPendingReport();
 		}
-
-		// 将存储的工具调用传递给 enforcement handler
-		const enrichedContext = {
-			...context,
-			tickId,
-			agentId,
-			lastGameActionCall,
-			wsClient,
-		};
-
-		const { runEnforcement } = await import("./tools/cyber_jianghu_act/enforcement.js");
-		await runEnforcement(event, enrichedContext);
-
-		// 重置状态
-		lastGameActionCall = null;
 	});
 
-	console.log("[cyber-jianghu-openclaw] Plugin registered successfully");
+	isInitializing = false;
+	console.log("[cyber-jianghu] Plugin registered successfully");
 }
 
-// Initialize WebSocket connection to Agent
-async function initWebSocket(api: PluginAPI): Promise<void> {
+// ---------------------------------------------------------------------------
+// WebSocket initialization
+// ---------------------------------------------------------------------------
+
+async function initWebSocket(): Promise<void> {
 	try {
-		const { getWsClientAsync } = await import("./tools/cyber_jianghu_act/ws-client.js");
+		// Trigger port discovery via HTTP health check
+		await getHttpClient();
 
-		console.log("[cyber-jianghu-openclaw] Connecting to Agent via WebSocket...");
+		// Get discovered port for WS connection
+		const agentInfo = getAgentInfo();
+		const port = agentInfo?.apiPort ?? 23340;
 
-		const client = await getWsClientAsync(0);
+		wsClient = new WsClient({ port });
 
-		// CRITICAL: Set wsClient BEFORE any async operations to prevent double initialization
-		wsClient = client;
+		// Tick handler — wrap async to prevent silent rejection in void callback
+		wsClient.onTickHandler = (msg: TickMessage) => {
+			currentTickId = msg.tick_id;
+			Promise.resolve()
+				.then(async () => {
+					if (msg.context) {
+						await writeContextMd(msg.context, msg.tick_id);
+					}
+					await reporter?.onTick(msg);
+				})
+				.catch((e) => console.error("[cyber-jianghu] Tick handler error:", e));
+		};
 
-		// Handle tick messages
-		client.onTick(async (tick) => {
-			console.log(`[cyber-jianghu-openclaw] Tick ${tick.tick_id} received (deadline: ${tick.deadline_ms})`);
-			sharedTickState = {
-				tickId: tick.tick_id,
-				deadlineMs: tick.deadline_ms,
-				agentId: tick.state?.agent_id || "unknown",
-				state: tick.state,
-				context: tick.context,
-			};
+		// Agent died
+		wsClient.onAgentDiedHandler = (msg: AgentDiedMessage) => {
+			console.log(
+				`[cyber-jianghu] Agent died: ${msg.cause} at ${msg.location} (tick ${msg.tick_id})`,
+			);
+			reporter?.onAgentDied(msg).catch((e) =>
+				console.error("[cyber-jianghu] onAgentDied error:", e),
+			);
+		};
 
-			// 生成并写入 CONTEXT.md
-			await updateContextMd(tick.tick_id);
-		});
+		// Server errors
+		wsClient.onServerErrorHandler = (msg: ServerErrorMessage) => {
+			console.error(
+				`[cyber-jianghu] Server error: ${msg.code} - ${msg.message}`,
+			);
+		};
 
-		// Handle tick closed messages
-		client.onTickClosed((msg) => {
-			console.log(`[cyber-jianghu-openclaw] Tick ${msg.tick_id} closed: ${msg.reason}`);
-		});
+		// Dialogue from other agents
+		wsClient.onDialogueHandler = (msg: ServerDialogueMessage) => {
+			const content = msg.content || msg.opening_remark || "(无声)";
+			console.log(
+				`[cyber-jianghu] Dialogue from ${msg.from_agent_id}: ${content}`,
+			);
+		};
 
-		// Handle errors
-		client.onError((error) => {
-			console.error("[cyber-jianghu-openclaw] WebSocket error:", error.message);
-		});
-
-		// Handle disconnect
-		client.onDisconnect(() => {
-			console.log("[cyber-jianghu-openclaw] WebSocket disconnected");
-		});
-
-		// Handle connect
-		client.onConnect(() => {
-			console.log("[cyber-jianghu-openclaw] WebSocket connected to Agent");
-		});
-
-		// Now connect after wsClient is set
-		await client.connect();
+		await wsClient.connect();
+		console.log("[cyber-jianghu] WebSocket connected to Agent");
 	} catch (e) {
-		console.error("[cyber-jianghu-openclaw] Failed to connect to Agent:", e);
+		console.error("[cyber-jianghu] Failed to connect to Agent:", e);
 	} finally {
 		isInitializing = false;
 	}
 }
 
-// 跟踪上一个写入的 tick ID，避免重复写入
-let lastWrittenTickId = 0;
+// ---------------------------------------------------------------------------
+// Intent submission (called from agent_end hook)
+// ---------------------------------------------------------------------------
 
-// 生成并写入 CONTEXT.md - 仅使用 WebSocket 传递的 context，禁止 HTTP
-async function updateContextMd(tickId: number): Promise<void> {
-	if (tickId <= lastWrittenTickId) {
-		return;
+function submitPendingIntent(): void {
+	if (!wsClient?.isConnected()) return;
+
+	if (lastGameActionCall && currentTickId > 0) {
+		const actionData =
+			lastGameActionCall.target || lastGameActionCall.data
+				? {
+						target: lastGameActionCall.target,
+						data: lastGameActionCall.data,
+					}
+				: undefined;
+
+		wsClient.sendIntent(
+			currentTickId,
+			lastGameActionCall.action,
+			actionData,
+			lastGameActionCall.reasoning,
+		);
+		console.log(
+			`[cyber-jianghu] Intent submitted: ${lastGameActionCall.action} for tick ${currentTickId}`,
+		);
+	} else if (currentTickId > 0) {
+		// LLM didn't call act → submit idle
+		wsClient.sendIntent(
+			currentTickId,
+			"idle",
+			undefined,
+			"LLM did not call jianghu_act",
+		);
+		console.log(
+			`[cyber-jianghu] Idle submitted for tick ${currentTickId}`,
+		);
 	}
 
-	const context = sharedTickState?.context;
-	if (!context) {
-		console.warn("[cyber-jianghu-openclaw] No context available from WebSocket tick");
-		return;
-	}
+	lastGameActionCall = null;
+}
+
+// ---------------------------------------------------------------------------
+// CONTEXT.md writer
+// ---------------------------------------------------------------------------
+
+async function writeContextMd(context: string, tickId: number): Promise<void> {
+	if (tickId <= lastWrittenTickId) return;
 
 	const workspaceDir = "/home/node/workspace";
-	const filePath = `${workspaceDir}/CONTEXT.md`;
-
 	try {
-		await fs.writeFile(filePath, context, "utf-8");
+		await fs.writeFile(`${workspaceDir}/CONTEXT.md`, context, "utf-8");
 		lastWrittenTickId = tickId;
-		console.log(`[cyber-jianghu-openclaw] CONTEXT.md updated for tick ${tickId}`);
+		console.log(
+			`[cyber-jianghu] CONTEXT.md updated for tick ${tickId}`,
+		);
 	} catch (e) {
-		console.error("[cyber-jianghu-openclaw] Failed to write CONTEXT.md:", e);
+		console.error("[cyber-jianghu] Failed to write CONTEXT.md:", e);
 	}
 }

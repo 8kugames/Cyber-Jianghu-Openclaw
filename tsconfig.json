@@ -19,7 +19,8 @@
       "@/*": ["./*"]
     },
     "allowImportingTsExtensions": true,
-    "noEmit": true
+    "noEmit": true,
+    "types": ["node"]
   },
   "include": ["*.ts", "**/*.ts"],
   "exclude": ["node_modules", "dist"]

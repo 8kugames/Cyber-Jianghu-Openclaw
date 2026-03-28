@@ -2,24 +2,20 @@
 // OpenClaw Agent Configuration: Player Agent Template
 // ============================================================================
 //
-// This is a template configuration for a Cyber-Jianghu player agent.
-// Copy this file and customize it for your agent.
+// Cyber-Jianghu v0.3.0 — LLM Provider + User Communication Bridge
+//
+// Architecture:
+//   User (IM) ↕ OpenClaw (Brain) ←WS→ Agent (Body/Rust) ←WS→ Game Server
+//
+// The OpenClaw plugin:
+//   - Connects to Rust Agent via WebSocket for tick/intent protocol
+//   - Registers act/dream tools for the LLM
+//   - Pushes daily narrative reports to user's IM channel
+//   - Allows user "dream injection" for limited intervention
 //
 // Usage:
 //   cp templates/player-agent.json5 ~/.openclaw/agents/your-agent.json5
 //   # Edit the file and replace placeholders with actual values
-//
-// Architecture:
-//   OpenClaw Gateway (Brain) <--WebSocket--> cyber-jianghu-agent (Body) <--WebSocket--> Game Server (World)
-//       Primary connection                            ws://host:23333/ws
-//       HTTP API for state queries
-//
-// Tick-Driven Workflow:
-//   1. Game Server sends WorldState to Agent via WebSocket
-//   2. Agent broadcasts tick to connected OpenClaw via WebSocket
-//   3. OpenClaw cron fires -> bootstrap hook checks for new tick
-//   4. If new tick: fetch CONTEXT.md, LLM decides, calls cyber_jianghu_act
-//   5. Agent submits Intent to Game Server before deadline
 // ============================================================================
 
 {
@@ -30,24 +26,22 @@
   // 工作区配置
   agents: {
     defaults: {
-      // 工作区路径（包含 SOUL.md, CONTEXT.md, memory/ 等）
       workspace: "~/.openclaw/cyber-jianghu-openclaw-agents/{AGENT_NAME}",
 
-      // Cron 配置（Tick-Driven）
-      // bootstrap hook 会检测 tick_id 是否变化，避免重复决策
+      // Cron: Agent loop is driven by WebSocket ticks, not polling
+      // The WS client receives tick events and writes CONTEXT.md
+      // LLM reads CONTEXT.md and decides via cyber_jianghu_act
       cron: [
         {
-          // 游戏主循环 - 定期检查是否有新的 WorldState
-          // bootstrap hook 会检测 tick_id 是否变化
-          name: "game-tick-poll",
-          expression: "*/10 * * * * *",  // 每 10 秒执行
+          name: "game-tick-check",
+          expression: "*/10 * * * * *",  // 每 10 秒检查
           prompt: `检查并响应游戏状态。
 
 **CRITICAL**: 你必须调用 cyber_jianghu_act 工具来提交动作。没有例外。
 
 决策流程:
 1. 阅读 CONTEXT.md 了解当前状态
-2. 根据你的人设(SOUL.md)和当前情况思考
+2. 根据你的人设和当前情况思考
 3. 调用 cyber_jianghu_act 工具提交动作
 
 如果 CONTEXT.md 显示 tick 没有变化，可以跳过本次决策。`,
@@ -56,34 +50,28 @@
         }
       ],
 
-      // Heartbeat 配置（禁用 - 使用 Cron 代替）
       heartbeat: {
         every: "0m",
         enabled: false
       },
 
-      // 模型配置
-      model: "claude/claude-sonnet-4-20250514",  // 或其他模型
-
-      // 超时配置 - 从 API 获取 tick 剩余时间
-      // 建议：timeoutSeconds < seconds_until_next_tick
+      model: "claude/claude-sonnet-4-20250514",
       timeoutSeconds: 45
     }
   },
 
-  // Hook 配置 - 使用 bootstrap hook
+  // Hook 配置 - 使用新的 bootstrap hook
   hooks: {
-    "agent:bootstrap": "hooks/cyber-jianghu-openclaw-bootstrap"
+    "agent:bootstrap": "hooks/bootstrap"
   },
 
-  // 工具配置 - cyber_jianghu_act 是必需的
+  // 工具配置
   tools: {
     required: ["cyber_jianghu_act"],
-    // 允许基本工具
-    allow: ["cyber_jianghu_act", "read", "write"]
+    allow: ["cyber_jianghu_act", "cyber_jianghu_dream", "read", "write"]
   },
 
-  // 沙箱配置（多 Agent 场景建议启用）
+  // 沙箱配置
   sandbox: {
     enabled: false,
     workspaceRoot: "~/.openclaw/sandboxes",

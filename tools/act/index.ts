@@ -8,7 +8,7 @@
 // the intent; actual validation and submission happen in the agent_end hook
 // (see register.ts).
 //
-// The tool exports mutable module-level state so the enforcement hook in
+// The tool exports mutable module-level state so the agent_end hook in
 // register.ts can read the recorded action after the LLM turn completes.
 
 import { Type } from "@sinclair/typebox";
@@ -18,7 +18,7 @@ import type { GameActionParams, TickState } from "./types.js";
 // Module-level mutable state
 // ---------------------------------------------------------------------------
 
-/** The last action recorded by the act tool (reset each tick by enforcement). */
+/** The last action recorded by the act tool (reset each tick by agent_end hook). */
 export let lastGameActionCall: GameActionParams | null = null;
 
 /** Shared tick state set by the WebSocket tick handler. */
@@ -28,7 +28,7 @@ export let sharedTickState: TickState | null = null;
 // Reset helper
 // ---------------------------------------------------------------------------
 
-/** Reset the recorded action call (called by enforcement after submission). */
+/** Reset the recorded action call (called by agent_end hook after submission). */
 export function resetActionCall(): void {
 	lastGameActionCall = null;
 }
