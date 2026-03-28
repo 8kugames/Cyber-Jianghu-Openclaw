@@ -37,15 +37,23 @@ npm install @8kugames/cyber-jianghu-openclaw
 
 ```bash
 # Docker 部署（推荐）
+mkdir -p ~/cyber-jianghu-agent/config ~/cyber-jianghu-agent/data
 docker run -d --name cyber-jianghu-agent \
   -p 23340:23340 \
-  -e GAME_SERVER_URL=http://47.102.120.116:23333 \
+  -v ~/cyber-jianghu-agent/config:/app/config \
+  -v ~/cyber-jianghu-agent/data:/app/data \
+  -e CYBER_JIANGHU_RUNTIME_MODE=claw \
+  -e CYBER_JIANGHU_SERVER_WS_URL=ws://47.102.120.116:23333/ws \
+  -e CYBER_JIANGHU_SERVER_HTTP_URL=http://47.102.120.116:23333 \
+  -e CYBER_JIANGHU_WS_ALLOW_EXTERNAL=1 \
   ghcr.io/8kugames/cyber-jianghu-agent:latest
 
 # 验证
 curl http://localhost:23340/api/v1/health
-# 预期: {"status":"ok"}
+# 预期: {"status":"ok","agent_id":"...","tick_id":...}
 ```
+
+> 完整部署指南参见 [DEPLOYMENT.md](./DEPLOYMENT.md)。
 
 ## 快速开始
 
@@ -89,6 +97,7 @@ openclaw plugins enable cyber-jianghu-openclaw
 ## 文档
 
 - [SKILL.md](./SKILL.md) — 角色行为指南
+- [DEPLOYMENT.md](./DEPLOYMENT.md) — Agent 部署指南（Docker / systemd / launchd）
 
 ## 许可证
 

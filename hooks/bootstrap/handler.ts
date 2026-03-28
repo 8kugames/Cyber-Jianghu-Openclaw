@@ -13,7 +13,7 @@
 // 4. Register character with Agent HTTP API
 
 import { promises as fs } from "fs";
-import type { CharacterConfig, HookContext, HookEvent, PluginConfig } from "./types.js";
+import type { CharacterConfig, HookEvent, PluginConfig } from "./types.js";
 import {
 	loadCharacterConfig,
 	validateCharacterConfig,
@@ -71,7 +71,7 @@ async function checkCharacterRegistered(): Promise<boolean> {
 			console.log(`[bootstrap] Character already registered: ${character.name}`);
 			return true;
 		}
-	} catch (e) {
+	} catch {
 		// Character not registered or Agent not available
 		console.log("[bootstrap] Character not yet registered or Agent unavailable");
 	}

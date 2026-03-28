@@ -1,7 +1,7 @@
 # Cyber-Jianghu OpenClaw Bootstrap Hook
 
 ## Hook Name
-`cyber-jianghu-openclaw-bootstrap`
+`bootstrap`（目录 `hooks/bootstrap/`）
 
 ## Events
 - `agent:bootstrap` - Triggered when the agent starts up

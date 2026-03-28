@@ -28,9 +28,8 @@
     defaults: {
       workspace: "~/.openclaw/cyber-jianghu-openclaw-agents/{AGENT_NAME}",
 
-      // Cron: Agent loop is driven by WebSocket ticks, not polling
-      // The WS client receives tick events and writes CONTEXT.md
-      // LLM reads CONTEXT.md and decides via cyber_jianghu_act
+      // Cron: WebSocket 接收 tick 并写入 CONTEXT.md
+      // 此 cron 每 10 秒检查 CONTEXT.md 是否有新 tick，有则触发 LLM 决策
       cron: [
         {
           name: "game-tick-check",
