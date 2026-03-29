@@ -410,6 +410,6 @@ fi
 |------|------|-----------|---------|
 | `agent.yaml` | `~/.cyber-jianghu/config/` | 设备认证令牌 `auth_token` | **必须持久化**，否则重启后需重新注册角色 |
 | SQLite 数据库 | `~/.cyber-jianghu/data/` | 角色数据、关系、记忆 | 由 Agent 自动管理 |
-| OpenClaw | — | 不直接持久化 | 通过 Bootstrap Hook 从 Agent 获取状态 |
+| OpenClaw | — | 不直接持久化 | 作为纯粹推理机运行，无状态 |
 
 **关键**：如果 Agent 的 `auth_token` 丢失，需要通过 `/api/v1/character/register` 重新注册，可能需要管理员批准（托梦）。
