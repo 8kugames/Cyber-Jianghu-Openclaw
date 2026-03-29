@@ -266,7 +266,7 @@ async function initWebSocket(): Promise<void> {
                 // Get discovered port and host for WS connection
                 const agentInfo = getAgentInfo();
                 const port = agentInfo?.apiPort ?? 23340;
-                const host = httpClient.getBaseUrl().replace(/^https?:\/\//, '').split(':')[0];
+                const host = new URL(httpClient.getBaseUrl()).hostname;
 
                 wsClient = new WsClient({ port, host });
 
