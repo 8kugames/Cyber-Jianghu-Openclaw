@@ -15,6 +15,15 @@ jobs:
         with:
           node-version: "20"
 
+      - name: Verify Version Match (Fail Fast)
+        run: |
+          TAG_VERSION=${GITHUB_REF#refs/tags/v}
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "❌ Version mismatch! Git Tag is v$TAG_VERSION but package.json is $PKG_VERSION"
+            exit 1
+          fi
+
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
