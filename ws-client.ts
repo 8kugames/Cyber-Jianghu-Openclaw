@@ -14,6 +14,15 @@
 //
 
 import type {
+	TickMessage,
+	TickClosedMessage,
+	ServerErrorMessage,
+	ServerDialogueMessage,
+	AgentDiedMessage,
+	GameRulesUpdateMessage,
+	WorldBuildingRulesUpdateMessage,
+	MissedMessagesMessage,
+	IntentPayload,
 	LLMRequestMessage,
 	LLMResponsePayload,
 } from "./types.js";
@@ -57,7 +66,14 @@ const DEFAULT_CONFIG: Readonly<WsClientConfig> = {
 // ============================================================================
 
 export interface WsClientHandlers {
-        onLLMRequest?: (msg: LLMRequestMessage) => void;
+	onTick?: (msg: TickMessage) => void;
+	onTickClosed?: (msg: TickClosedMessage) => void;
+	onServerError?: (msg: ServerErrorMessage) => void;
+	onDialogue?: (msg: ServerDialogueMessage) => void;
+	onAgentDied?: (msg: AgentDiedMessage) => void;
+	onGameRulesUpdate?: (msg: GameRulesUpdateMessage) => void;
+	onWorldBuildingRulesUpdate?: (msg: WorldBuildingRulesUpdateMessage) => void;
+	onLLMRequest?: (msg: LLMRequestMessage) => void;
 }
 
 // ============================================================================
@@ -187,6 +203,23 @@ export class WsClient {
 	// Upstream: send helpers
 	// -----------------------------------------------------------------------
 
+	/** Submit an intent for the given tick. */
+	sendIntent(
+		tickId: number,
+		actionType: string,
+		actionData?: unknown,
+		thoughtLog?: string,
+	): void {
+		const msg: IntentPayload = {
+			type: "intent",
+			tick_id: tickId,
+			action_type: actionType,
+			...(actionData !== undefined && { action_data: actionData }),
+			...(thoughtLog !== undefined && { thought_log: thoughtLog }),
+		};
+		this.sendRaw(msg);
+	}
+
 	/** Send LLM response back to the Agent. */
 	sendLLMResponse(requestId: string, content: string, error?: string): void {
 		const msg: LLMResponsePayload = {
@@ -199,13 +232,20 @@ export class WsClient {
 	}
 
 	// -----------------------------------------------------------------------
-        // Handler registration (post-construction setters)
-        // -----------------------------------------------------------------------
+	// Handler registration (post-construction setters)
+	// -----------------------------------------------------------------------
 
-        // The handlers object is already passed via the constructor.  These
-        // setters allow late-binding (e.g. after a tool initialises).
+	// The handlers object is already passed via the constructor.  These
+	// setters allow late-binding (e.g. after a tool initialises).
 
-        set onLLMRequestHandler(fn: ((msg: LLMRequestMessage) => void) | undefined) { this.handlers.onLLMRequest = fn; }
+	set onTickHandler(fn: ((msg: TickMessage) => void) | undefined) { this.handlers.onTick = fn; }
+	set onTickClosedHandler(fn: ((msg: TickClosedMessage) => void) | undefined) { this.handlers.onTickClosed = fn; }
+	set onServerErrorHandler(fn: ((msg: ServerErrorMessage) => void) | undefined) { this.handlers.onServerError = fn; }
+	set onDialogueHandler(fn: ((msg: ServerDialogueMessage) => void) | undefined) { this.handlers.onDialogue = fn; }
+	set onAgentDiedHandler(fn: ((msg: AgentDiedMessage) => void) | undefined) { this.handlers.onAgentDied = fn; }
+	set onGameRulesUpdateHandler(fn: ((msg: GameRulesUpdateMessage) => void) | undefined) { this.handlers.onGameRulesUpdate = fn; }
+	set onWorldBuildingRulesUpdateHandler(fn: ((msg: WorldBuildingRulesUpdateMessage) => void) | undefined) { this.handlers.onWorldBuildingRulesUpdate = fn; }
+	set onLLMRequestHandler(fn: ((msg: LLMRequestMessage) => void) | undefined) { this.handlers.onLLMRequest = fn; }
 
 	// -----------------------------------------------------------------------
 	// Private: message dispatch
@@ -236,6 +276,40 @@ export class WsClient {
 				this.waitingForPong = false;
 				this.lastPongAt = Date.now();
 				break;
+
+			// --- core tick lifecycle ---
+			case "tick":
+				this.handlers.onTick?.(msg as unknown as TickMessage);
+				break;
+			case "tick_closed":
+				this.handlers.onTickClosed?.(msg as unknown as TickClosedMessage);
+				break;
+
+			// --- server passthrough ---
+			case "server_error":
+				this.handlers.onServerError?.(msg as unknown as ServerErrorMessage);
+				break;
+			case "server_dialogue":
+				this.handlers.onDialogue?.(msg as unknown as ServerDialogueMessage);
+				break;
+			case "agent_died":
+				this.handlers.onAgentDied?.(msg as unknown as AgentDiedMessage);
+				break;
+			case "server_game_rules_update":
+				this.handlers.onGameRulesUpdate?.(msg as unknown as GameRulesUpdateMessage);
+				break;
+			case "server_world_building_rules_update":
+				this.handlers.onWorldBuildingRulesUpdate?.(msg as unknown as WorldBuildingRulesUpdateMessage);
+				break;
+
+			// --- recovery ---
+			case "missed_messages": {
+				const mm = msg as unknown as MissedMessagesMessage;
+				console.warn(
+					`[ws-client] Missed ${mm.count} messages (suggest_resync=${mm.suggest_resync})`,
+				);
+				break;
+			}
 
 			// --- llm integration ---
 			case "llm_request":

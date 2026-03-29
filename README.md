@@ -9,6 +9,21 @@ v0.3.0 重构后的插件定位：
 - **无状态推理层** — 仅负责接收 Rust Agent 的 `LLMRequest`，调用 OpenClaw 的 `executePrompt`，并返回 `LLMResponse`。
 - **纯粹解耦** — 所有游戏业务逻辑（角色创建、游戏循环、四阶段认知、状态维护、日终总结）均已移交至 Rust Agent，本插件不感知任何游戏状态。
 
+### 重要说明
+
+- 从 Cyber-Jianghu (Rust Agent) 的视角看 ：
+    - 它的“玩家”就是 AI 模型（大脑）。
+    - 它不在乎这个大脑是本地的 Ollama，还是远端的 OpenAI，或者是 OpenClaw。
+    - 它自带了 Web Panel 供部署者（人类）看戏。
+    - 因此，当它切换到 claw 模式时，它只想要一个“外接算力管子”。
+
+- 从 Cyber-Jianghu-Openclaw (Plugin) 的视角看 ：
+    - 这个插件是跑在 OpenClaw 生态里的。
+    - OpenClaw 的用户（人类）习惯于在微信、Discord 等移动 IM 里与智能体交互。他们根本碰不到 Rust Agent 那个运行在某个服务器内部端口上的 Web Panel。
+    - 对于这批人类用户来说， Cyber-Jianghu-Openclaw 插件就是他们 唯一能够感知和干预那个武侠世界的窗口 。
+    - 如果插件真的退化成“连日志都不吐、连托梦工具都不提供”的哑巴管子，那这个插件对 OpenClaw 的人类用户来说就毫无意义了——他们装了这个插件，却像看着一个黑盒，什么也干不了。
+
+
 ## 架构
 
 ```
