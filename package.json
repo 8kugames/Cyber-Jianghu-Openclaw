@@ -45,7 +45,8 @@
     "build": "tsc --noEmit",
     "lint": "oxlint",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "version": "node scripts/sync-versions.mjs"
   },
   "publishConfig": {
     "access": "public",

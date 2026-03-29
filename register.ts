@@ -224,6 +224,15 @@ export default async function register(api: PluginAPI): Promise<void> {
                 },
         });
 
+        const CHECK_INTERVAL_MS = 60_000;
+        setInterval(() => {
+                const report = reporter?.getPendingReport();
+                if (report) {
+                        console.log(`[reporter] [${report.type}] ${report.content.substring(0, 100)}...`);
+                        reporter?.clearPendingReport();
+                }
+        }, CHECK_INTERVAL_MS);
+
         // Init WebSocket
         await initWebSocket();
 
