@@ -124,7 +124,57 @@ export default async function register(api: PluginAPI): Promise<void> {
                 },
         });
 
-        // 2. Register dream tool (for user intervention)
+        // 2. Register create character tool
+        api.registerTool({
+                name: "cyber_jianghu_create_character",
+                description: "在赛博江湖中创建一个新的侠客角色。需要收集用户的设定并转化为结构化数据。",
+                parameters: Type.Object({
+                        name: Type.String({ description: "角色姓名，例如：李寻欢" }),
+                        age: Type.Optional(Type.Number({ description: "年龄（1-100）" })),
+                        gender: Type.Optional(Type.String({ description: "性别（male, female, other）" })),
+                        appearance: Type.Optional(Type.String({ description: "外貌描述" })),
+                        identity: Type.Optional(Type.String({ description: "身份背景" })),
+                        personality: Type.Optional(Type.Array(Type.String(), { description: "性格特征列表，例如：['嫉恶如仇', '嗜酒如命']" })),
+                        values: Type.Optional(Type.Array(Type.String(), { description: "核心价值观列表" })),
+                        language_style: Type.Optional(Type.Object({
+                                tone: Type.Optional(Type.String()),
+                                catchphrases: Type.Optional(Type.Array(Type.String())),
+                                vocabulary: Type.Optional(Type.Array(Type.String()))
+                        })),
+                        goals: Type.Optional(Type.Object({
+                                short_term: Type.Optional(Type.Array(Type.String())),
+                                long_term: Type.Optional(Type.Array(Type.String()))
+                        })),
+                        system_prompt: Type.Optional(Type.String({ description: "自定义系统提示词（高级）" }))
+                }),
+                execute: async (_id, params) => {
+                        try {
+                                const httpClient = await getHttpClient();
+                                await httpClient.post("/api/v1/character/register", params);
+                                return {
+                                        content: [
+                                                {
+                                                        type: "text",
+                                                        text: `侠客 ${params.name} 创建成功！角色已注入赛博江湖。`,
+                                                },
+                                        ],
+                                };
+                        } catch (error) {
+                                const msg = error instanceof Error ? error.message : String(error);
+                                return {
+                                        content: [
+                                                {
+                                                        type: "text",
+                                                        text: `角色创建失败: ${msg}。可能是因为后端 Agent 未启动或连接异常。`,
+                                                },
+                                        ],
+                                        isError: true,
+                                };
+                        }
+                }
+        });
+
+        // 3. Register dream tool (for user intervention)
         api.registerTool({
                 name: "cyber_jianghu_dream",
                 description:
