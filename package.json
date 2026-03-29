@@ -53,7 +53,6 @@
     "registry": "https://registry.npmjs.org"
   },
   "devDependencies": {
-    "@sinclair/typebox": "^0.34.48",
     "@types/node": "^25.5.0",
     "oxlint": "^1.57.0",
     "typescript": "^5.9.3",
