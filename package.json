@@ -24,11 +24,10 @@
     "SKILL.md",
     "README.md",
     "DEPLOYMENT.md",
-    "hooks/",
-    "tools/",
-    "plugins/",
-    "templates/",
     "register.ts",
+    "ws-client.ts",
+    "http-client.ts",
+    "types.ts",
     "openclaw.plugin.json"
   ],
   "openclaw": {
