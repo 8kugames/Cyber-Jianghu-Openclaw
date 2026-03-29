@@ -5,6 +5,56 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [unreleased] — 2026-03-29
+
+### ⚠️ BREAKING CHANGES
+
+- **工具名称变更** — `openclaw.plugin.json` contracts.tools 列表调整：
+  - `cyber_jianghu_context` → `cyber_jianghu_status`（状态查询）
+  - `cyber_jianghu_act` → `cyber_jianghu_create_character`（角色创建）
+- **配置 schema 简化** — `openclaw.plugin.json` configSchema 从详细 character 对象简化为空对象 `{}`
+  - 旧版支持通过插件配置传入角色信息（name、age、gender 等）
+  - 新版角色配置统一通过引导流程或环境变量处理
+- **目录结构重组** — `tools/act/` 子目录文件扁平化到根目录：
+  - `tools/act/ws-client.ts` → `ws-client.ts`
+  - `tools/act/http-client.ts` → `http-client.ts`
+  - `tools/act/types.ts` → `types.ts`
+
+### Deleted
+
+- `hooks/bootstrap/HOOK.md`（引导流程文档，已迁移到独立指南）
+- `hooks/bootstrap/handler.ts`（交互式向导处理器）
+- `hooks/bootstrap/prompts.ts`（引导提示词模板）
+- `hooks/bootstrap/templates.ts`（角色配置模板）
+- `hooks/bootstrap/types.ts`（引导相关类型定义）
+- `templates/.env.example`（示例环境变量文件）
+- `templates/README.md`（模板目录说明）
+- `templates/player-agent.json5`（玩家角色模板）
+- `tests/report-builder.test.ts`（日报生成器测试）
+
+### Added
+
+- `openclaw对接联调方案.md` — OpenClaw 与 Rust Agent 联调测试指南（见 .gitignore）
+
+### Changed
+
+- **插件定位重构** — README/SKILL/DEPLOYMENT 全面更新，定位为"双面人"架构：
+  - 底层：面向 Rust Agent 的无状态推理引擎（接收 LLMRequest，返回 LLMResponse）
+  - 顶层：面向用户的唯一交互窗口（IM 侧状态查询、托梦干预、日终报告）
+- `register.ts` 重构：移除 act/context 工具，新增 status/create_character 工具
+- `plugins/reporter/` 恢复：日报生成器 + 死亡叙事
+- package.json files 字段更新以反映扁平化目录结构
+
+---
+
+## [0.3.1] — 2026-03-29
+
+### Changed
+
+- CI release 工作流增加 Git 标签与 package.json 版本一致性检查，防止发布错误版本
+
+---
+
 ## [0.3.0] — 2026-03-28
 
 ### ⚠️ BREAKING CHANGES

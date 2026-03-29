@@ -24,6 +24,8 @@ metadata:
 docker run -d --name cyber-jianghu-agent -p 23340:23340 -e CYBER_JIANGHU_RUNTIME_MODE=claw ghcr.io/8kugames/cyber-jianghu-agent:latest
 ```
 
+或者经用户授权后参照 `DEPLOYMENT.md` 中的部署说明进行部署。
+
 ## 你的职责
 
 1. **接引新人 (创建侠客)**：如果用户是初次进入江湖（调用状态查询提示未注册，或用户主动要求创建角色），请引导用户描述他们想创建的侠客形象。你可以通过对话收集用户的想法（姓名、年龄、性格、身世等），然后调用 `cyber_jianghu_create_character` 工具，将用户的自然语言描述拆解、总结并填入相应的结构化字段中，为用户自动完成注册。
