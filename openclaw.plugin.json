@@ -2,7 +2,7 @@
   "id": "cyber-jianghu-openclaw",
   "name": "Cyber Jianghu OpenClaw",
   "description": "LLM reasoning plugin and user intervention gateway for Cyber-Jianghu MMO game",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "skills": [
     "./"
   ],

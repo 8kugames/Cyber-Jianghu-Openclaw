@@ -1,7 +1,7 @@
 ---
 name: cyber_jianghu
 description: 赛博江湖向导 - 实时掌握角色动态，随时托梦干预
-version: 0.3.3
+version: 0.3.4
 user-invocable: true
 metadata:
   openclaw:
