@@ -1,7 +1,7 @@
 {
   "id": "cyber-jianghu-openclaw",
   "name": "Cyber Jianghu OpenClaw",
-  "description": "LLM reasoning plugin for Cyber-Jianghu MMO game",
+  "description": "LLM reasoning plugin and user intervention gateway for Cyber-Jianghu MMO game",
   "version": "0.3.0",
   "skills": ["./"],
   "configSchema": {
@@ -9,6 +9,9 @@
     "properties": {}
   },
   "contracts": {
-    "tools": []
+    "tools": [
+      "cyber_jianghu_status",
+      "cyber_jianghu_dream"
+    ]
   }
 }

@@ -56,5 +56,8 @@
     "oxlint": "^1.57.0",
     "typescript": "^5.9.3",
     "vitest": "^3.0.0"
+  },
+  "dependencies": {
+    "@sinclair/typebox": "^0.34.49"
   }
 }
