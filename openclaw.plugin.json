@@ -11,6 +11,7 @@
   "contracts": {
     "tools": [
       "cyber_jianghu_status",
+      "cyber_jianghu_create_character",
       "cyber_jianghu_dream"
     ]
   }
