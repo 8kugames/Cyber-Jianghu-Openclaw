@@ -93,10 +93,6 @@ export class WsClient {
 	private lastMessageAt: number = 0;
 	private waitingForPong: boolean = false;
 
-	// Server heartbeat tracking (server-initiated ping)
-	private lastHeartbeatAt: number = Date.now();
-	private heartbeatCheckInterval: ReturnType<typeof setInterval> | null = null;
-
 	// Reconnect bookkeeping
 	private reconnectAttempts: number = 0;
 	private shouldReconnect: boolean = false;
@@ -156,9 +152,7 @@ export class WsClient {
 					this.hasConnectedOnce = true;
 					this.lastPongAt = Date.now();
 					this.lastMessageAt = Date.now();
-					this.lastHeartbeatAt = Date.now();
 					this.startHeartbeat();
-					this.startHeartbeatCheck();
 					if (isReconnect) {
 						this.handlers.onReconnect?.();
 					}
@@ -179,7 +173,6 @@ export class WsClient {
 				socket.onclose = (ev: CloseEvent) => {
 					console.log(`[ws-client] Disconnected: code=${ev.code} reason=${ev.reason}`);
 					this.stopHeartbeat();
-					this.stopHeartbeatCheck();
 					this.ws = null;
 					if (this.shouldReconnect) {
 						this.scheduleReconnect();
@@ -197,7 +190,6 @@ export class WsClient {
 		this.shouldReconnect = false;
 		this.clearReconnectTimer();
 		this.stopHeartbeat();
-		this.stopHeartbeatCheck();
 		this.clearConnectTimer();
 
 		if (this.ws) {
@@ -291,7 +283,6 @@ export class WsClient {
 			// --- heartbeat (server-initiated) ---
 			case "ping":
 				this.sendRaw({ type: "pong", timestamp: msg.timestamp });
-				this.lastHeartbeatAt = Date.now();
 				break;
 
 			// --- heartbeat (client-initiated) ---
@@ -336,7 +327,6 @@ export class WsClient {
 
 		// --- llm integration ---
 			case "llm_request":
-			case "l_l_m_request":  // Agent 发送的格式（下划线分隔）
 				this.handlers.onLLMRequest?.(msg as unknown as LLMRequestMessage);
 				break;
 
@@ -385,26 +375,6 @@ export class WsClient {
 			this.heartbeatTimer = null;
 		}
 		this.waitingForPong = false;
-	}
-
-	private startHeartbeatCheck(): void {
-		if (this.heartbeatCheckInterval !== null) {
-			clearInterval(this.heartbeatCheckInterval);
-		}
-		this.heartbeatCheckInterval = setInterval(() => {
-			const silenceMs = Date.now() - this.lastHeartbeatAt;
-			if (silenceMs > 30_000) {
-				console.warn(`[ws-client] Server heartbeat timeout: ${silenceMs}ms, reconnecting...`);
-				this.teardownWs();
-			}
-		}, 10_000);
-	}
-
-	private stopHeartbeatCheck(): void {
-		if (this.heartbeatCheckInterval !== null) {
-			clearInterval(this.heartbeatCheckInterval);
-			this.heartbeatCheckInterval = null;
-		}
 	}
 
 	// -----------------------------------------------------------------------
