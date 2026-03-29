@@ -1,38 +1,14 @@
 {
   "id": "cyber-jianghu-openclaw",
   "name": "Cyber Jianghu OpenClaw",
-  "description": "LLM agent plugin for Cyber-Jianghu MMO game — autonomous character with daily reports and dream injection",
+  "description": "LLM reasoning plugin for Cyber-Jianghu MMO game",
   "version": "0.3.0",
   "skills": ["./"],
   "configSchema": {
     "type": "object",
-    "properties": {
-      "headless": {
-        "type": "boolean",
-        "default": false
-      },
-      "character": {
-        "type": "object",
-        "properties": {
-          "name": { "type": "string" },
-          "age": { "type": "number", "minimum": 1, "maximum": 100 },
-          "gender": { "type": "string", "enum": ["male", "female", "other"] },
-          "appearance": { "type": "string" },
-          "identity": { "type": "string" },
-          "personality": { "type": "array", "items": { "type": "string" } },
-          "values": { "type": "array", "items": { "type": "string" } },
-          "language_style": { "type": "string" },
-          "goals": { "type": "array", "items": { "type": "string" } },
-          "backstory": { "type": "string" }
-        }
-      }
-    }
+    "properties": {}
   },
   "contracts": {
-    "tools": [
-      "cyber_jianghu_context",
-      "cyber_jianghu_act",
-      "cyber_jianghu_dream"
-    ]
+    "tools": []
   }
 }
