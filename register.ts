@@ -18,6 +18,8 @@ import type {
         AgentDiedMessage,
 } from "./types.js";
 
+import { Reporter } from "./plugins/reporter/index.js";
+
 // ---------------------------------------------------------------------------
 // Plugin API types (minimal inline definitions)
 // ---------------------------------------------------------------------------
@@ -53,6 +55,7 @@ interface ToolResult {
 // ---------------------------------------------------------------------------
 
 let wsClient: WsClient | null = null;
+let reporter: Reporter | null = null;
 let isInitializing = false;
 let globalPluginApi: PluginAPI | null = null;
 let latestTickSnapshot: {
@@ -73,6 +76,9 @@ export default async function register(api: PluginAPI): Promise<void> {
         }
         isInitializing = true;
         globalPluginApi = api;
+
+        // 0. Initialize Reporter
+        reporter = new Reporter();
 
         // 1. Register status tool (for user to query current state)
         api.registerTool({
@@ -171,6 +177,20 @@ export default async function register(api: PluginAPI): Promise<void> {
         // Init WebSocket
         await initWebSocket();
 
+        // 3. Register agent_end hook for report delivery
+        api.on("agent_end", async () => {
+                const pending = reporter?.getPendingReport();
+                if (pending) {
+                        console.log(
+                                `[cyber-jianghu] Pending ${pending.type} report available for delivery`,
+                        );
+                        // Report delivery: the report content is logged and available.
+                        // In production, OpenClaw could push this to the user's IM channel.
+                        console.log(`[reporter] Report:\n${pending.content}`);
+                        reporter?.clearPendingReport();
+                }
+        });
+
         isInitializing = false;
         console.log("[cyber-jianghu] Plugin registered successfully");
 }
@@ -190,7 +210,7 @@ async function initWebSocket(): Promise<void> {
 
                 wsClient = new WsClient({ port });
 
-                // Tick handler - just store the latest state for user queries
+                // Tick handler - store the latest state for user queries and trigger reporter
                 wsClient.onTickHandler = (msg: TickMessage) => {
                         latestTickSnapshot = {
                                 tickId: msg.tick_id,
@@ -198,14 +218,21 @@ async function initWebSocket(): Promise<void> {
                                 context: msg.context ?? null,
                                 updatedAt: new Date().toISOString(),
                         };
+                        Promise.resolve()
+                                .then(async () => {
+                                        await reporter?.onTick(msg);
+                                })
+                                .catch((e) => console.error("[cyber-jianghu] Tick handler error:", e));
                 };
 
-                // Agent died - we might want to notify user in the future
+                // Agent died - trigger reporter death narrative
                 wsClient.onAgentDiedHandler = (msg: AgentDiedMessage) => {
                         console.log(
                                 `[cyber-jianghu] Agent died: ${msg.cause} at ${msg.location} (tick ${msg.tick_id})`,
                         );
-                        // TODO: Implement user notification via OpenClaw channel API
+                        reporter?.onAgentDied(msg).catch((e) =>
+                                console.error("[cyber-jianghu] onAgentDied error:", e),
+                        );
                 };
 
                 // LLM Request handler
