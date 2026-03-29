@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { execSync } from "node:child_process";
 
 async function readText(path) {
   return fs.readFile(path, "utf8");
@@ -6,6 +7,24 @@ async function readText(path) {
 
 async function writeText(path, text) {
   await fs.writeFile(path, text, "utf8");
+}
+
+function gitAdd(files) {
+  try {
+    execSync(`git add ${files.join(" ")}`, { stdio: "pipe" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function gitCommit(message) {
+  try {
+    execSync(`git commit -m "${message}"`, { stdio: "pipe" });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function updateSkillVersion(skillText, version) {
@@ -76,9 +95,11 @@ async function main() {
 
   const pluginPath = "openclaw.plugin.json";
   const plugin = JSON.parse(await readText(pluginPath));
+  let pluginUpdated = false;
   if (plugin.version !== version) {
     plugin.version = version;
     await writeText(pluginPath, formatJson(plugin));
+    pluginUpdated = true;
     console.log(`Updated ${pluginPath} version to ${version}`);
   }
 
@@ -88,6 +109,19 @@ async function main() {
   if (nextChangelogText !== changelogText) {
     await writeText(changelogPath, nextChangelogText);
     console.log(`Updated ${changelogPath} unreleased entry to ${version}`);
+  }
+
+  const syncedFiles = [];
+  if (nextSkillText !== skillText) syncedFiles.push("SKILL.md");
+  if (pluginUpdated) syncedFiles.push("openclaw.plugin.json");
+  if (nextChangelogText !== changelogText) syncedFiles.push("CHANGELOG.md");
+
+  if (syncedFiles.length > 0) {
+    if (gitAdd(syncedFiles) && gitCommit(`chore: sync versions to ${version}`)) {
+      console.log(`Auto-committed: ${syncedFiles.join(", ")}`);
+    } else {
+      console.log(`MANUAL ACTION REQUIRED: git add ${syncedFiles.join(" ")} && git commit`);
+    }
   }
 }
 
