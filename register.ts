@@ -19,6 +19,7 @@ import type {
 } from "./types.js";
 
 import { Reporter } from "./plugins/reporter/index.js";
+import OpenAI from "openai";
 
 // ---------------------------------------------------------------------------
 // Plugin API types (minimal inline definitions)
@@ -57,13 +58,25 @@ interface ToolResult {
 let wsClient: WsClient | null = null;
 let reporter: Reporter | null = null;
 let isInitializing = false;
-let globalPluginApi: PluginAPI | null = null;
+let globalPluginApi: PluginAPI | null = null; // kept for future use
 let latestTickSnapshot: {
         tickId: number;
         deadlineMs: number;
         context: string | null;
         updatedAt: string;
 } | null = null;
+
+let openaiClient: OpenAI | null = null;
+
+function getOpenAIClient(): OpenAI {
+        if (!openaiClient) {
+                openaiClient = new OpenAI({
+                        baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                        apiKey: process.env.DASHSCOPE_API_KEY || "",
+                });
+        }
+        return openaiClient;
+}
 
 // ---------------------------------------------------------------------------
 // Plugin entry point
@@ -261,13 +274,14 @@ export default async function register(api: PluginAPI): Promise<void> {
 async function initWebSocket(): Promise<void> {
         try {
                 // Trigger port discovery via HTTP health check
-                await getHttpClient();
+                const httpClient = await getHttpClient();
 
-                // Get discovered port for WS connection
+                // Get discovered port and host for WS connection
                 const agentInfo = getAgentInfo();
                 const port = agentInfo?.apiPort ?? 23340;
+                const host = httpClient.getBaseUrl().replace(/^https?:\/\//, '').split(':')[0];
 
-                wsClient = new WsClient({ port });
+                wsClient = new WsClient({ port, host });
 
                 // Tick handler - store the latest state for user queries and trigger reporter
                 wsClient.onTickHandler = (msg: TickMessage) => {
@@ -294,21 +308,25 @@ async function initWebSocket(): Promise<void> {
                         );
                 };
 
-                // LLM Request handler
                 wsClient.onLLMRequestHandler = async (msg: LLMRequestMessage) => {
                         console.log(`[cyber-jianghu] Received LLMRequest: ${msg.request_id}`);
 
-                        if (!globalPluginApi || !wsClient?.isConnected()) {
-                                console.warn(`[cyber-jianghu] Plugin API unavailable or WS disconnected, dropping LLMRequest: ${msg.request_id}`);
+                        if (!wsClient?.isConnected()) {
+                                console.warn(`[cyber-jianghu] WS disconnected, dropping LLMRequest: ${msg.request_id}`);
                                 return;
                         }
 
                         try {
-                                const result = await globalPluginApi.executePrompt?.(msg.prompt);
+                                const openai = getOpenAIClient();
+                                const completion = await openai.chat.completions.create({
+                                        model: "qwen3-max",
+                                        messages: [{ role: "user", content: msg.prompt }],
+                                });
+                                const result = completion.choices[0]?.message?.content ?? "";
                                 if (result) {
                                         wsClient.sendLLMResponse(msg.request_id, result);
                                 } else {
-                                        throw new Error("No response from LLM");
+                                        throw new Error("Empty response from LLM");
                                 }
                         } catch (e) {
                                 const errorMsg = e instanceof Error ? e.message : String(e);
@@ -316,6 +334,24 @@ async function initWebSocket(): Promise<void> {
                                 if (wsClient?.isConnected()) {
                                         wsClient.sendLLMResponse(msg.request_id, "", errorMsg);
                                 }
+                        }
+                };
+
+                // Reconnect handler - sync state after reconnect
+                wsClient.onReconnectHandler = async () => {
+                        console.log("[cyber-jianghu] WebSocket reconnected, syncing state...");
+                        try {
+                                const httpClient = await getHttpClient();
+                                const state = await httpClient.getGameState();
+                                latestTickSnapshot = {
+                                        tickId: state.tick_id,
+                                        deadlineMs: state.deadline_ms,
+                                        context: null,
+                                        updatedAt: new Date().toISOString(),
+                                };
+                                console.log(`[cyber-jianghu] State synced after reconnect: tick_id=${state.tick_id}`);
+                        } catch (e) {
+                                console.error("[cyber-jianghu] Failed to sync state after reconnect:", e);
                         }
                 };
 

@@ -74,6 +74,8 @@ export interface WsClientHandlers {
 	onGameRulesUpdate?: (msg: GameRulesUpdateMessage) => void;
 	onWorldBuildingRulesUpdate?: (msg: WorldBuildingRulesUpdateMessage) => void;
 	onLLMRequest?: (msg: LLMRequestMessage) => void;
+	/** Called after successful reconnection (not on initial connect) */
+	onReconnect?: () => void;
 }
 
 // ============================================================================
@@ -85,16 +87,21 @@ export class WsClient {
 	private ws: WebSocket | null = null;
 	private readonly handlers: WsClientHandlers;
 
-	// Heartbeat bookkeeping
+	// Heartbeat bookkeeping (client-initiated)
 	private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 	private lastPongAt: number = 0;
 	private lastMessageAt: number = 0;
 	private waitingForPong: boolean = false;
 
+	// Server heartbeat tracking (server-initiated ping)
+	private lastHeartbeatAt: number = Date.now();
+	private heartbeatCheckInterval: ReturnType<typeof setInterval> | null = null;
+
 	// Reconnect bookkeeping
 	private reconnectAttempts: number = 0;
 	private shouldReconnect: boolean = false;
 	private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+	private hasConnectedOnce: boolean = false;
 
 	// Connect timeout
 	private connectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -144,10 +151,17 @@ export class WsClient {
 
 				socket.onopen = () => {
 					console.log("[ws-client] Connected");
+					const isReconnect = this.hasConnectedOnce;
 					this.reconnectAttempts = 0;
+					this.hasConnectedOnce = true;
 					this.lastPongAt = Date.now();
 					this.lastMessageAt = Date.now();
+					this.lastHeartbeatAt = Date.now();
 					this.startHeartbeat();
+					this.startHeartbeatCheck();
+					if (isReconnect) {
+						this.handlers.onReconnect?.();
+					}
 					onSettled();
 				};
 
@@ -165,6 +179,7 @@ export class WsClient {
 				socket.onclose = (ev: CloseEvent) => {
 					console.log(`[ws-client] Disconnected: code=${ev.code} reason=${ev.reason}`);
 					this.stopHeartbeat();
+					this.stopHeartbeatCheck();
 					this.ws = null;
 					if (this.shouldReconnect) {
 						this.scheduleReconnect();
@@ -182,6 +197,7 @@ export class WsClient {
 		this.shouldReconnect = false;
 		this.clearReconnectTimer();
 		this.stopHeartbeat();
+		this.stopHeartbeatCheck();
 		this.clearConnectTimer();
 
 		if (this.ws) {
@@ -246,6 +262,7 @@ export class WsClient {
 	set onGameRulesUpdateHandler(fn: ((msg: GameRulesUpdateMessage) => void) | undefined) { this.handlers.onGameRulesUpdate = fn; }
 	set onWorldBuildingRulesUpdateHandler(fn: ((msg: WorldBuildingRulesUpdateMessage) => void) | undefined) { this.handlers.onWorldBuildingRulesUpdate = fn; }
 	set onLLMRequestHandler(fn: ((msg: LLMRequestMessage) => void) | undefined) { this.handlers.onLLMRequest = fn; }
+	set onReconnectHandler(fn: (() => void) | undefined) { this.handlers.onReconnect = fn; }
 
 	// -----------------------------------------------------------------------
 	// Private: message dispatch
@@ -271,7 +288,13 @@ export class WsClient {
 		const type = msg.type as string;
 
 		switch (type) {
-			// --- heartbeat ---
+			// --- heartbeat (server-initiated) ---
+			case "ping":
+				this.sendRaw({ type: "pong", timestamp: msg.timestamp });
+				this.lastHeartbeatAt = Date.now();
+				break;
+
+			// --- heartbeat (client-initiated) ---
 			case "pong":
 				this.waitingForPong = false;
 				this.lastPongAt = Date.now();
@@ -311,8 +334,9 @@ export class WsClient {
 				break;
 			}
 
-			// --- llm integration ---
+		// --- llm integration ---
 			case "llm_request":
+			case "l_l_m_request":  // Agent 发送的格式（下划线分隔）
 				this.handlers.onLLMRequest?.(msg as unknown as LLMRequestMessage);
 				break;
 
@@ -351,7 +375,7 @@ export class WsClient {
 
 			// Send ping
 			this.waitingForPong = true;
-			this.sendRaw({ type: "ping" });
+			this.sendRaw({ type: "ping", timestamp: Date.now() });
 		}, this.config.heartbeatIntervalMs);
 	}
 
@@ -361,6 +385,26 @@ export class WsClient {
 			this.heartbeatTimer = null;
 		}
 		this.waitingForPong = false;
+	}
+
+	private startHeartbeatCheck(): void {
+		if (this.heartbeatCheckInterval !== null) {
+			clearInterval(this.heartbeatCheckInterval);
+		}
+		this.heartbeatCheckInterval = setInterval(() => {
+			const silenceMs = Date.now() - this.lastHeartbeatAt;
+			if (silenceMs > 30_000) {
+				console.warn(`[ws-client] Server heartbeat timeout: ${silenceMs}ms, reconnecting...`);
+				this.teardownWs();
+			}
+		}, 10_000);
+	}
+
+	private stopHeartbeatCheck(): void {
+		if (this.heartbeatCheckInterval !== null) {
+			clearInterval(this.heartbeatCheckInterval);
+			this.heartbeatCheckInterval = null;
+		}
 	}
 
 	// -----------------------------------------------------------------------

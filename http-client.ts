@@ -144,6 +144,11 @@ export class HttpClient {
 	getBaseUrl(): string {
 		return this.baseUrl;
 	}
+
+	/** Get current game state (tick_id, deadline_ms) for reconnection sync. */
+	async getGameState(): Promise<{ tick_id: number; deadline_ms: number }> {
+		return this.get<{ tick_id: number; deadline_ms: number }>("/api/v1/tick");
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -167,7 +172,9 @@ export async function getHttpClient(
 
 	const cfg = { ...DEFAULT_CONFIG, ...config };
 	const host =
-		(typeof globalThis !== 'undefined' && (globalThis as any).__DOCKER_AGENT_HOST) || cfg.defaultHost;
+		(typeof globalThis !== 'undefined' && (globalThis as any).__DOCKER_AGENT_HOST) ||
+		(typeof process !== 'undefined' && process.env?.DOCKER_AGENT_HOST) ||
+		cfg.defaultHost;
 
 	// Use cached agent info if available
 	if (cachedAgentInfo) {
