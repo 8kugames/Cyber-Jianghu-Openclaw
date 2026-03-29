@@ -1,23 +1,19 @@
 # Cyber-Jianghu OpenClaw
 
-Cyber-Jianghu (赛博江湖) OpenClaw Plugin — LLM 提供者 + 用户通讯桥梁。
+Cyber-Jianghu (赛博江湖) OpenClaw Plugin — 作为纯粹的底层推理机 (Reasoning Engine) 运行。
 
 ## 定位
 
 v0.3.0 重构后的插件定位：
 
-- **LLM 提供者** — 通过 WebSocket 连接 Rust Agent，接收 Tick 数据并提供 LLM 推理能力
-- **日志记录** — 当前版本默认输出报告到运行日志
-- **有限干预** — 用户通过"托梦"进行每游戏日 1 次的有限干预（最多 5 Tick）
+- **无状态推理层** — 仅负责接收 Rust Agent 的 `LLMRequest`，调用 OpenClaw 的 `executePrompt`，并返回 `LLMResponse`。
+- **纯粹解耦** — 所有游戏业务逻辑（角色创建、游戏循环、四阶段认知、状态维护、日终总结）均已移交至 Rust Agent，本插件不感知任何游戏状态。
 
 ## 架构
 
 ```
-User (IM Channel)
-    ↕ messages (via OpenClaw channel adapter)
-    ↕ reports (via cron job announce delivery)
-OpenClaw (Plugin)
-    ↕ WS (Tick / Intent / Dialogue / Death)
+OpenClaw (Reasoning Engine)
+    ↕ WS (LLMRequest / LLMResponse)
 Agent (Rust, ports 23340-23349)
     ↕ WS (ServerMessage / ClientMessage)
 Game Server (天道引擎, port 23333)
@@ -33,7 +29,7 @@ npm install @8kugames/cyber-jianghu-openclaw
 
 ### 前提条件
 
-`cyber-jianghu-agent` (Rust) 需独立部署。OpenClaw 只负责连接，不负责部署或安装 Agent。
+`cyber-jianghu-agent` (Rust) 需独立部署。OpenClaw 仅作为 LLM 提供方被动等待/主动连接。
 
 ```bash
 # Docker 部署（推荐）
@@ -47,10 +43,6 @@ docker run -d --name cyber-jianghu-agent \
   -e CYBER_JIANGHU_SERVER_HTTP_URL=http://47.102.120.116:23333 \
   -e CYBER_JIANGHU_WS_ALLOW_EXTERNAL=1 \
   ghcr.io/8kugames/cyber-jianghu-agent:latest
-
-# 验证
-curl http://localhost:23340/api/v1/health
-# 预期: {"status":"ok","agent_id":"...","tick_id":...}
 ```
 
 > 完整部署指南参见 [DEPLOYMENT.md](./DEPLOYMENT.md)。
@@ -71,54 +63,15 @@ cyber-jianghu-agent run --mode claw --port 23340
 openclaw plugins enable cyber-jianghu-openclaw
 ```
 
-### 3. 创建 OpenClaw Agent 配置
+### 3. 开始联调
 
-```bash
-cp templates/player-agent.json5 ~/.openclaw/agents/my-agent.json5
-```
-
-这一步不需要你手工做角色创建。角色信息由 OpenClaw 在 `agent:bootstrap` 阶段与用户交互收集并自动注册。
-
-### 4. 启动 OpenClaw Agent 并完成角色初始化
-
-启动你在 OpenClaw 中的该 Agent 实例后，会触发 `agent:bootstrap`：
-
-- 已有 `character` 配置或 `CHARACTER_*` 环境变量时：自动注册角色
-- 无预设配置且为交互终端时：进入角色向导
-- `HEADLESS=true` 且无角色配置时：启动失败（Fail Fast）
-
-## 核心功能
-
-### 工具
-
-| 工具 | 描述 |
-|------|------|
-| `cyber_jianghu_context` | 获取当前 Tick 的实时上下文快照（决策前必调） |
-| `cyber_jianghu_act` | 仅作日志记录，实际意图由 Agent 内置引擎提交 |
-| `cyber_jianghu_dream` | 托梦干预，每游戏日 1 次，最多 5 Tick |
-
-### Hook
-
-| Hook | 描述 |
-|------|------|
-| `agent:bootstrap` | 角色注册和配置（交互式向导） |
-
-### 日报
-
-每游戏日（约 24 分钟现实时间）自动生成武侠风格叙事报告，当前版本默认输出到运行日志。
-
-## 配置
-
-参见 `templates/.env.example` 和 `openclaw.plugin.json`。
-
-关键配置项：
-
-- `character` — 角色设定（首次运行可通过交互式向导配置）
+参考项目根目录下的 `openclaw对接联调方案.md` 进行数据流测试。
 
 ## 文档
 
-- [SKILL.md](./SKILL.md) — 角色行为指南
+- [SKILL.md](./SKILL.md) — 插件定位与规范
 - [DEPLOYMENT.md](./DEPLOYMENT.md) — Agent 部署指南（Docker / systemd / launchd）
+- [openclaw对接联调方案.md](./openclaw对接联调方案.md) — 架构调整后的联调测试方案
 
 ## 许可证
 
