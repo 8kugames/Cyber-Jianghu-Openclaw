@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [unreleased] — 2026-03-30
+
+### Fixed
+
+- **恢复 OpenClaw LLM 委托** — 回退错误引入的 DashScope 直连调用（插件不应绕过"大脑"直接调 LLM）
+- **host 解析改用 URL parser** — WebSocket 连接时的 host 提取从脆弱的正则改为 `new URL().hostname`
+- **移除冗余 server heartbeat check** — 删除与已有 client-initiated heartbeat（idle timeout）功能重叠的 server-initiated heartbeat 检测机制
+- **移除 `l_l_m_request` hack** — 删除对 Agent 端序列化 bug 的兼容 workaround
+
+### Added
+
+- **WS 重连后状态同步** — 新增 `onReconnect` handler，重连成功后通过 HTTP `/api/v1/tick` 拉取最新 tick 状态
+- **server ping/pong 响应** — `ws-client` 增加对 server-initiated `ping` 消息的 `pong` 回复
+- **`DOCKER_AGENT_HOST` 环境变量** — HTTP 客户端 host 发现增加 `process.env.DOCKER_AGENT_HOST` fallback
+- **`getGameState()` API** — `HttpClient` 新增获取当前 tick 状态的方法
+- **client ping 加 timestamp** — 客户端心跳 ping 消息附带时间戳
+
+### Changed
+
+- **`hasConnectedOnce` 标记** — 区分首次连接与重连，重连时触发 `onReconnect` 回调
+
+---
+
 ## [0.3.2] — 2026-03-29
 
 ### ⚠️ BREAKING CHANGES
@@ -31,10 +54,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `templates/README.md`（模板目录说明）
 - `templates/player-agent.json5`（玩家角色模板）
 - `tests/report-builder.test.ts`（日报生成器测试）
-
-### Added
-
-- `openclaw对接联调方案.md` — OpenClaw 与 Rust Agent 联调测试指南（见 .gitignore）
 
 ### Changed
 
