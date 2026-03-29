@@ -19,7 +19,6 @@ import type {
 } from "./types.js";
 
 import { Reporter } from "./plugins/reporter/index.js";
-import OpenAI from "openai";
 
 // ---------------------------------------------------------------------------
 // Plugin API types (minimal inline definitions)
@@ -58,25 +57,13 @@ interface ToolResult {
 let wsClient: WsClient | null = null;
 let reporter: Reporter | null = null;
 let isInitializing = false;
-let globalPluginApi: PluginAPI | null = null; // kept for future use
+let globalPluginApi: PluginAPI | null = null;
 let latestTickSnapshot: {
         tickId: number;
         deadlineMs: number;
         context: string | null;
         updatedAt: string;
 } | null = null;
-
-let openaiClient: OpenAI | null = null;
-
-function getOpenAIClient(): OpenAI {
-        if (!openaiClient) {
-                openaiClient = new OpenAI({
-                        baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                        apiKey: process.env.DASHSCOPE_API_KEY || "",
-                });
-        }
-        return openaiClient;
-}
 
 // ---------------------------------------------------------------------------
 // Plugin entry point
@@ -311,22 +298,17 @@ async function initWebSocket(): Promise<void> {
                 wsClient.onLLMRequestHandler = async (msg: LLMRequestMessage) => {
                         console.log(`[cyber-jianghu] Received LLMRequest: ${msg.request_id}`);
 
-                        if (!wsClient?.isConnected()) {
-                                console.warn(`[cyber-jianghu] WS disconnected, dropping LLMRequest: ${msg.request_id}`);
+                        if (!globalPluginApi || !wsClient?.isConnected()) {
+                                console.warn(`[cyber-jianghu] Plugin API unavailable or WS disconnected, dropping LLMRequest: ${msg.request_id}`);
                                 return;
                         }
 
                         try {
-                                const openai = getOpenAIClient();
-                                const completion = await openai.chat.completions.create({
-                                        model: "qwen3-max",
-                                        messages: [{ role: "user", content: msg.prompt }],
-                                });
-                                const result = completion.choices[0]?.message?.content ?? "";
+                                const result = await globalPluginApi.executePrompt?.(msg.prompt);
                                 if (result) {
                                         wsClient.sendLLMResponse(msg.request_id, result);
                                 } else {
-                                        throw new Error("Empty response from LLM");
+                                        throw new Error("No response from LLM");
                                 }
                         } catch (e) {
                                 const errorMsg = e instanceof Error ? e.message : String(e);
