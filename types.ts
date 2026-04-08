@@ -103,6 +103,31 @@ export interface AvailableAction {
 }
 
 // ============================================================================
+// Experience / Report types
+// ============================================================================
+
+/**
+ * Experience log entry returned by GET /api/v1/character/experiences.
+ * Used by the Reporter for daily report generation.
+ */
+export interface Experience {
+  tick_id: number;
+  world_time: { year: number; month: number; day: number; hour: number; minute: number };
+  event: string;
+  observer_thought?: string;
+  intent_summary?: string;
+}
+
+/**
+ * Persona summary for character death narrative.
+ */
+export interface PersonaSummary {
+  name: string;
+  personality: string[];
+  values: string[];
+}
+
+// ============================================================================
 // WorldState -- full per-tick snapshot
 // ============================================================================
 
@@ -120,7 +145,6 @@ export interface WorldState {
   entities: Entity[];
   nearby_items: SceneItem[];
   events_log: WorldEvent[];
-  available_actions: AvailableAction[];
 }
 
 // ============================================================================
@@ -262,6 +286,15 @@ export interface MissedMessagesMessage {
   suggest_resync: boolean;
 }
 
+/** Server immediate event (e.g. speak broadcast). */
+export interface ServerImmediateEventMessage {
+  type: 'server_immediate_event';
+  event_type: string;
+  tick_id: number;
+  description: string;
+  metadata: Record<string, unknown>;
+}
+
 /** Union of every downstream message the plugin may receive. */
 export type DownstreamMessage =
   | TickMessage
@@ -272,6 +305,7 @@ export type DownstreamMessage =
   | GameRulesUpdateMessage
   | WorldBuildingRulesUpdateMessage
   | MissedMessagesMessage
+  | ServerImmediateEventMessage
   | LLMRequestMessage;
 
 /** LLM request from the Agent's cognitive engine. */

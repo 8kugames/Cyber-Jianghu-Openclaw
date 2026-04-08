@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.5] — 2026-04-08
+
+### Fixed
+
+- **SKILL.md 托梦功能说明** — 补充每日限制（每天仅限 1 次）、使用场景、持续时间规范
+
+### Added
+
+- **SKILL.md 工具使用示例** — 添加 `cyber_jianghu_create_character`、`cyber_jianghu_dream`、状态查询回复的示例
+- **`Experience` 类型** — 在 `types.ts` 中添加与 Rust `Experience` 结构对齐的类型定义
+- **`ServerImmediateEventMessage` 类型** — 添加 Server 即时事件消息类型定义
+- **`ServerImmediateEvent` 消息处理** — `ws-client.ts` 添加对 `server_immediate_event` 消息的日志记录
+- **`PersonaSummary` 类型** — 添加死亡叙事用的人设摘要类型
+
+---
+
 ## [0.3.4] — 2026-03-29
 
 ### Fixed

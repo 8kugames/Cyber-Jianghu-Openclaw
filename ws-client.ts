@@ -22,6 +22,7 @@ import type {
 	GameRulesUpdateMessage,
 	WorldBuildingRulesUpdateMessage,
 	MissedMessagesMessage,
+	ServerImmediateEventMessage,
 	IntentPayload,
 	LLMRequestMessage,
 	LLMResponsePayload,
@@ -321,6 +322,15 @@ export class WsClient {
 				const mm = msg as unknown as MissedMessagesMessage;
 				console.warn(
 					`[ws-client] Missed ${mm.count} messages (suggest_resync=${mm.suggest_resync})`,
+				);
+				break;
+			}
+
+			// --- server immediate events ---
+			case "server_immediate_event": {
+				const event = msg as unknown as ServerImmediateEventMessage;
+				console.log(
+					`[ws-client] Immediate event: ${event.event_type} (tick ${event.tick_id}): ${event.description}`,
 				);
 				break;
 			}
