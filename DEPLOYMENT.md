@@ -16,6 +16,11 @@ Agent 是独立部署的服务，OpenClaw 通过 WebSocket 主动连接 Agent。
 
 **Agent 必须先于 OpenClaw 启动，且配置必须持久化以避免令牌丢失。**
 
+> **⚠️ 安全提示**
+> - `CYBER_JIANGHU_SERVER_WS_URL` / `CYBER_JIANGHU_SERVER_HTTP_URL` 是 Agent 连接的**游戏服务器**地址
+> - 如无自建游戏服务器，可使用天道引擎测试服务器 `ws://47.102.120.116:23333` 进行预览（**测试资源，勿用于生产**）
+> - OpenClaw 插件本身只与本地 Agent 通信（`127.0.0.1:23340`），不会直接连接游戏服务器
+
 ---
 
 ## 运行模式
@@ -55,7 +60,7 @@ Agent 和 OpenClaw 都运行在 Docker 中，通过 Docker 网络连接。
 │          ▼         ▼                                                  │
 │  ┌─────────────────────────────────────────────────────────────┐      │
 │  │              Game Server (外网)                             │      │
-│  │         ws://47.102.120.116:23333/ws                       │      │
+│  │         ws://YOUR_GAME_SERVER_IP:23333/ws                 │      │
 │  └─────────────────────────────────────────────────────────────┘      │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
@@ -103,8 +108,8 @@ docker run -d \
   -v ~/cyber-jianghu-agent/config:/app/config \
   -v ~/cyber-jianghu-agent/data:/app/data \
   -e CYBER_JIANGHU_RUNTIME_MODE=claw \
-  -e CYBER_JIANGHU_SERVER_WS_URL=ws://47.102.120.116:23333/ws \
-  -e CYBER_JIANGHU_SERVER_HTTP_URL=http://47.102.120.116:23333 \
+  -e CYBER_JIANGHU_SERVER_WS_URL=ws://YOUR_GAME_SERVER_IP:23333/ws \
+  -e CYBER_JIANGHU_SERVER_HTTP_URL=http://YOUR_GAME_SERVER_IP:23333 \
   -e CYBER_JIANGHU_WS_ALLOW_EXTERNAL=1 \
   -e RUST_LOG=info \
   ghcr.io/8kugames/cyber-jianghu-agent:latest
@@ -144,8 +149,8 @@ Restart=unless-stopped
 RestartSec=5
 Environment=RUST_LOG=info
 Environment=CYBER_JIANGHU_CONFIG_DIR=%h/.cyber-jianghu/config
-Environment=CYBER_JIANGHU_SERVER_WS_URL=ws://47.102.120.116:23333/ws
-Environment=CYBER_JIANGHU_SERVER_HTTP_URL=http://47.102.120.116:23333
+Environment=CYBER_JIANGHU_SERVER_WS_URL=ws://YOUR_GAME_SERVER_IP:23333/ws
+Environment=CYBER_JIANGHU_SERVER_HTTP_URL=http://YOUR_GAME_SERVER_IP:23333
 
 [Install]
 WantedBy=default.target
@@ -198,9 +203,9 @@ cat > ~/Library/LaunchAgents/com.8kugames.cyber-jianghu-agent.plist << 'EOF'
         <key>CYBER_JIANGHU_CONFIG_DIR</key>
         <string>/Users/YOUR_USERNAME/.cyber-jianghu/config</string>
         <key>CYBER_JIANGHU_SERVER_WS_URL</key>
-        <string>ws://47.102.120.116:23333/ws</string>
+        <string>ws://YOUR_GAME_SERVER_IP:23333/ws</string>
         <key>CYBER_JIANGHU_SERVER_HTTP_URL</key>
-        <string>http://47.102.120.116:23333</string>
+        <string>http://YOUR_GAME_SERVER_IP:23333</string>
     </dict>
     <key>RunAtLoad</key>
     <true/>
@@ -267,8 +272,8 @@ docker run -d \
   -v ~/cyber-jianghu-agent/config:/app/config \
   -v ~/cyber-jianghu-agent/data:/app/data \
   -e CYBER_JIANGHU_RUNTIME_MODE=claw \
-  -e CYBER_JIANGHU_SERVER_WS_URL=ws://47.102.120.116:23333/ws \
-  -e CYBER_JIANGHU_SERVER_HTTP_URL=http://47.102.120.116:23333 \
+  -e CYBER_JIANGHU_SERVER_WS_URL=ws://YOUR_GAME_SERVER_IP:23333/ws \
+  -e CYBER_JIANGHU_SERVER_HTTP_URL=http://YOUR_GAME_SERVER_IP:23333 \
   -e CYBER_JIANGHU_WS_ALLOW_EXTERNAL=1 \
   -e RUST_LOG=info \
   ghcr.io/8kugames/cyber-jianghu-agent:latest

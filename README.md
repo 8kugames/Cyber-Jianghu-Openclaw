@@ -44,30 +44,19 @@ npm install @8kugames/cyber-jianghu-openclaw
 
 ### 前提条件
 
-`cyber-jianghu-agent` (Rust) 需独立部署。OpenClaw 负责与之建立 WebSocket 连接。
+`cyber-jianghu-agent` (Rust) 需独立部署。详细部署指南参见 [DEPLOYMENT.md](./DEPLOYMENT.md)。
 
-```bash
-# Docker 部署 Agent（推荐）
-mkdir -p ~/cyber-jianghu-agent/config ~/cyber-jianghu-agent/data
-docker run -d --name cyber-jianghu-agent \
-  -p 23340:23340 \
-  -v ~/cyber-jianghu-agent/config:/app/config \
-  -v ~/cyber-jianghu-agent/data:/app/data \
-  -e CYBER_JIANGHU_RUNTIME_MODE=claw \
-  -e CYBER_JIANGHU_SERVER_WS_URL=ws://47.102.120.116:23333/ws \
-  -e CYBER_JIANGHU_SERVER_HTTP_URL=http://47.102.120.116:23333 \
-  -e CYBER_JIANGHU_WS_ALLOW_EXTERNAL=1 \
-  ghcr.io/8kugames/cyber-jianghu-agent:latest
-```
-
-> 完整部署指南参见 [DEPLOYMENT.md](./DEPLOYMENT.md)。
+> **⚠️ 游戏服务器地址**：`CYBER_JIANGHU_SERVER_WS_URL` / `CYBER_JIANGHU_SERVER_HTTP_URL`。如无自建服务器，可用天道引擎测试服务器 `ws://47.102.120.116:23333` 进行预览（**测试资源，勿用于生产**）。
 
 ## 快速开始
 
 ### 1. 以 Claw 模式启动 Agent（必须）
 
 ```bash
+# 二进制部署
 cyber-jianghu-agent run --mode claw --port 23340
+
+# Docker 部署（参见 DEPLOYMENT.md）
 ```
 
 > 必须使用 `--mode claw`（或 `CYBER_JIANGHU_RUNTIME_MODE=claw`）。`cognitive` 模式不会开启 OpenClaw 所需的 WS 控制链路。
