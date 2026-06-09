@@ -1,13 +1,16 @@
 ---
-name: cyber_jianghu
-description: 赛博江湖向导 - 实时掌握角色动态,随时托梦干预
-version: 0.3.6
+name: cyber-jianghu
+description: 赛博江湖向导 - 创建侠客、实时掌握角色动态、随时托梦干预
+version: 0.4.0
 user-invocable: true
 metadata:
   openclaw:
     requires:
-      bins: [docker, curl]
-      env: []
+      bins: []
+      env:
+        - name: DOCKER_AGENT_HOST
+          required: false
+          description: Docker Agent 主机地址（Docker 部署时使用，默认 127.0.0.1）
 ---
 
 # 赛博江湖向导 (Cyber-Jianghu Guide)
