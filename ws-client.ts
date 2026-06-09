@@ -23,9 +23,13 @@ import type {
 	WorldBuildingRulesUpdateMessage,
 	MissedMessagesMessage,
 	ServerImmediateEventMessage,
+	ReviewRequestMessage,
 	IntentPayload,
 	LLMRequestMessage,
+	LLMResponseMessage,
 	LLMResponsePayload,
+	ReviewResultPayload,
+	ReviewDecision,
 } from "./types.js";
 
 // ============================================================================
@@ -75,6 +79,8 @@ export interface WsClientHandlers {
 	onGameRulesUpdate?: (msg: GameRulesUpdateMessage) => void;
 	onWorldBuildingRulesUpdate?: (msg: WorldBuildingRulesUpdateMessage) => void;
 	onLLMRequest?: (msg: LLMRequestMessage) => void;
+	onLLMResponse?: (msg: LLMResponseMessage) => void;
+	onReviewRequest?: (msg: ReviewRequestMessage) => void;
 	/** Called after successful reconnection (not on initial connect) */
 	onReconnect?: () => void;
 }
@@ -240,6 +246,23 @@ export class WsClient {
 		this.sendRaw(msg);
 	}
 
+	/** Send review result back to the Agent (ReflectorSoul). */
+	sendReviewResult(
+		tickId: number,
+		decision: ReviewDecision,
+		reason?: string,
+		narrative?: string,
+	): void {
+		const msg: ReviewResultPayload = {
+			type: "review_result",
+			tick_id: tickId,
+			decision,
+			...(reason !== undefined && { reason }),
+			...(narrative !== undefined && { narrative }),
+		};
+		this.sendRaw(msg);
+	}
+
 	// -----------------------------------------------------------------------
 	// Handler registration (post-construction setters)
 	// -----------------------------------------------------------------------
@@ -255,6 +278,8 @@ export class WsClient {
 	set onGameRulesUpdateHandler(fn: ((msg: GameRulesUpdateMessage) => void) | undefined) { this.handlers.onGameRulesUpdate = fn; }
 	set onWorldBuildingRulesUpdateHandler(fn: ((msg: WorldBuildingRulesUpdateMessage) => void) | undefined) { this.handlers.onWorldBuildingRulesUpdate = fn; }
 	set onLLMRequestHandler(fn: ((msg: LLMRequestMessage) => void) | undefined) { this.handlers.onLLMRequest = fn; }
+	set onLLMResponseHandler(fn: ((msg: LLMResponseMessage) => void) | undefined) { this.handlers.onLLMResponse = fn; }
+	set onReviewRequestHandler(fn: ((msg: ReviewRequestMessage) => void) | undefined) { this.handlers.onReviewRequest = fn; }
 	set onReconnectHandler(fn: (() => void) | undefined) { this.handlers.onReconnect = fn; }
 
 	// -----------------------------------------------------------------------
@@ -338,6 +363,14 @@ export class WsClient {
 		// --- llm integration ---
 			case "llm_request":
 				this.handlers.onLLMRequest?.(msg as unknown as LLMRequestMessage);
+				break;
+			case "llm_response":
+				this.handlers.onLLMResponse?.(msg as unknown as LLMResponseMessage);
+				break;
+
+			// --- review (ReflectorSoul) ---
+			case "review_request":
+				this.handlers.onReviewRequest?.(msg as unknown as ReviewRequestMessage);
 				break;
 
 			default:

@@ -3,11 +3,11 @@
 // ============================================================================
 //
 // Matches the Rust WS protocol defined in:
-// - crates/agent/src/runtime/decision/ws/protocol.rs (DownstreamMessage/UpstreamMessage)
+// - crates/agent/src/runtime/claw/protocol.rs (DownstreamMessage/UpstreamMessage)
 // - crates/protocol/src/types/world.rs (WorldTime, WorldState)
-// - crates/protocol/src/types/entities.rs (Entity, SceneItem, etc.)
+// - crates/protocol/src/types/entities.rs (Entity, SceneItem, AgentSelfState, etc.)
 // - crates/protocol/src/types/locations.rs (Location)
-// - crates/agent/src/runtime/decision/http/cognitive_context.rs (CognitiveContext)
+// - crates/agent/src/infra/api/cognitive_context.rs (CognitiveContext)
 //
 // All JSON field names use snake_case to match the Rust serde serialization.
 
@@ -56,18 +56,81 @@ export interface InventoryItem {
   name: string;
   quantity: number;
   is_equipped: boolean;
+  /** Item type (consumable/weapon/material etc.). */
+  item_type?: string;
+  /** Alias list for LLM mapping. */
+  aliases?: string[];
+}
+
+/** Survival drive from server (pre-computed from narratives.yaml). */
+export interface SurvivalDrive {
+  /** Triggering attribute name (e.g. "hunger"). */
+  attribute: string;
+  /** Drive name (e.g. "寻找食物"). */
+  drive: string;
+  /** Reason description. */
+  reason: string;
+  /** Urgency level (1-10). */
+  urgency: number;
+  /** Goal description. */
+  goal: string;
+}
+
+/** Skill info for a learned skill. */
+export interface SkillInfo {
+  skill_id: string;
+  name: string;
+}
+
+/** Recipe detail (server-authoritative, per-tick). */
+export interface RecipeDetail {
+  recipe_id: string;
+  name: string;
+  description: string;
+  materials: RecipeMaterialInfo[];
+  result_item: string;
+  result_item_name: string;
+  result_quantity: number;
+  stamina_cost: number;
+}
+
+/** Recipe material info. */
+export interface RecipeMaterialInfo {
+  item_id: string;
+  item_name: string;
+  quantity: number;
 }
 
 /** Agent self-state -- dynamic, data-driven attributes. */
 export interface AgentSelfState {
   /** Numeric attribute map (hp, stamina, hunger, thirst, etc.). */
   attributes: Record<string, number>;
+  /** Derived attributes (real-time computed floats, e.g. dodge rate). */
+  derived_attributes?: Record<string, number>;
   /** Narrative descriptions of attributes (value -> natural language). */
   attribute_descriptions: Record<string, string>;
+  /** Survival drives (server pre-computed from narratives.yaml). */
+  survival_drives?: SurvivalDrive[];
   /** Active status effects (e.g. "中毒", "受伤"). */
   status_effects: string[];
   /** Items in the agent's inventory. */
   inventory: InventoryItem[];
+  /** Learned skills. */
+  skills?: SkillInfo[];
+  /** Known recipe details (server-authoritative). */
+  recipe_details?: RecipeDetail[];
+  /** Current age in game years. */
+  age_years?: number;
+  /** Maximum lifespan in game years. */
+  max_age?: number;
+}
+
+/** Recent action record for nearby entities. */
+export interface RecentAction {
+  tick_id: number;
+  action_type: string;
+  content?: string;
+  result: string;
 }
 
 /** Another agent visible in the same scene. */
@@ -77,6 +140,8 @@ export interface Entity {
   distance: number;
   state: string;
   hostile: boolean;
+  /** Recent actions taken by this entity. */
+  recent_actions?: RecentAction[];
 }
 
 /** A pickable-up item on the ground. */
@@ -85,6 +150,8 @@ export interface SceneItem {
   name: string;
   quantity: number;
   item_type: string;
+  /** Alias list for LLM mapping. */
+  aliases?: string[];
 }
 
 /** A structured world event from the server. */
@@ -95,11 +162,41 @@ export interface WorldEvent {
   metadata: Record<string, unknown>;
 }
 
+/** Action requirement info (data-driven, from actions.yaml). */
+export interface ActionRequirementInfo {
+  requirement_type: string;
+  target?: string;
+  [key: string]: unknown;
+}
+
+/** Action effect info (data-driven, from actions.yaml). */
+export interface ActionEffectInfo {
+  effect_type: string;
+  target?: string;
+  [key: string]: unknown;
+}
+
 /** An action the agent may take this tick. */
 export interface AvailableAction {
   action: string;
+  /** Short display name. */
+  name?: string;
   description: string;
+  /** Action category. */
+  category?: string;
   valid_targets?: string[];
+  /** Required action_data field names. */
+  required_fields?: string[];
+  /** OOC risk level ("low" | "medium" | "high"). */
+  ooc_risk?: string;
+  /** Action type aliases (Chinese variants + common English errors). */
+  aliases?: string[];
+  /** Field alias mapping. */
+  field_aliases?: Record<string, string[]>;
+  /** Action requirements. */
+  requirements?: ActionRequirementInfo[];
+  /** Action effects. */
+  effects?: ActionEffectInfo[];
 }
 
 // ============================================================================
@@ -119,12 +216,35 @@ export interface Experience {
 }
 
 /**
- * Persona summary for character death narrative.
+ * Persona summary for character death narrative & review requests.
  */
 export interface PersonaSummary {
   name: string;
   personality: string[];
   values: string[];
+}
+
+/**
+ * Private dialogue record (index only, no content).
+ */
+export interface PrivateDialogueRecord {
+  session_id: string;
+  agent_a_id: string;
+  agent_a_name: string;
+  agent_b_id: string;
+  agent_b_name: string;
+  message_count: number;
+  last_message_from: string;
+}
+
+/**
+ * Cross-agent inherited lesson (aggregated by death cause).
+ */
+export interface PublicLesson {
+  cause: string;
+  lesson: string;
+  death_count: number;
+  avg_survival_ticks: number;
 }
 
 // ============================================================================
@@ -145,6 +265,12 @@ export interface WorldState {
   entities: Entity[];
   nearby_items: SceneItem[];
   events_log: WorldEvent[];
+  /** Private dialogue index from last tick (who talked to whom). */
+  private_dialogue_log?: PrivateDialogueRecord[];
+  /** Last pipeline execution summary. */
+  last_execution_summary?: unknown;
+  /** Cross-agent inherited lessons (aggregated by death cause). */
+  lessons_learned?: PublicLesson[];
 }
 
 // ============================================================================
@@ -158,9 +284,13 @@ export interface Drive {
   reason: string;
 }
 
-/** Action info inside the planning stage. */
+/** Action info inside the planning stage of cognitive context. */
 export interface CognitiveAvailableAction {
   action: string;
+  /** Short display name. */
+  name: string;
+  /** Action category. */
+  category: string;
   target?: string;
   description: string;
 }
@@ -206,7 +336,6 @@ export interface CognitiveContext {
 export interface TickMessage {
   type: 'tick';
   tick_id: number;
-  deadline_ms: number;
   state: WorldState;
   /** Narrative context in Markdown (for LLM reasoning). */
   context?: string;
@@ -222,6 +351,22 @@ export interface TickClosedMessage {
   next_tick_in_ms: number;
 }
 
+/** Review request from ReflectorSoul (external review). */
+export interface ReviewRequestMessage {
+  type: 'review_request';
+  tick_id: number;
+  /** Player intent to review. */
+  player_intent: {
+    action_type: string;
+    action_data?: unknown;
+    thought_log?: string;
+  };
+  /** Persona summary for context. */
+  persona_summary: PersonaSummary;
+  /** World context narrative. */
+  world_context: string;
+}
+
 /** Agent death notification. */
 export interface AgentDiedMessage {
   type: 'agent_died';
@@ -233,6 +378,8 @@ export interface AgentDiedMessage {
   died_at: number;
   /** 0 = immediate, -1 = no rebirth. */
   rebirth_delay_ticks: number;
+  /** Death context (attribute snapshot etc.). */
+  metadata?: unknown;
 }
 
 /** Dialogue message forwarded from another agent. */
@@ -295,10 +442,26 @@ export interface ServerImmediateEventMessage {
   metadata: Record<string, unknown>;
 }
 
+/** LLM request from the Agent's cognitive engine. */
+export interface LLMRequestMessage {
+  type: 'llm_request';
+  request_id: string;
+  prompt: string;
+}
+
+/** LLM response from OpenClaw back to the Agent (downstream echo). */
+export interface LLMResponseMessage {
+  type: 'llm_response';
+  request_id: string;
+  content: string;
+  error?: string;
+}
+
 /** Union of every downstream message the plugin may receive. */
 export type DownstreamMessage =
   | TickMessage
   | TickClosedMessage
+  | ReviewRequestMessage
   | AgentDiedMessage
   | ServerDialogueMessage
   | ServerErrorMessage
@@ -306,14 +469,8 @@ export type DownstreamMessage =
   | WorldBuildingRulesUpdateMessage
   | MissedMessagesMessage
   | ServerImmediateEventMessage
-  | LLMRequestMessage;
-
-/** LLM request from the Agent's cognitive engine. */
-export interface LLMRequestMessage {
-  type: 'llm_request';
-  request_id: string;
-  prompt: string;
-}
+  | LLMRequestMessage
+  | LLMResponseMessage;
 
 // ============================================================================
 // Upstream messages (OpenClaw -> Agent)
@@ -326,6 +483,18 @@ export interface IntentPayload {
   action_type: string;
   action_data?: unknown;
   thought_log?: string;
+}
+
+/** Review decision enum. */
+export type ReviewDecision = 'approved' | 'rejected' | 'needs_modification';
+
+/** Review result sent back to the Agent. */
+export interface ReviewResultPayload {
+  type: 'review_result';
+  tick_id: number;
+  decision: ReviewDecision;
+  reason?: string;
+  narrative?: string;
 }
 
 /** LLM response sent back to the Agent. */
@@ -346,11 +515,4 @@ export interface GameActionParams {
   target?: string;
   data?: string;
   reasoning?: string;
-}
-
-/** Internal tick-state tracking for the plugin runtime. */
-export interface TickState {
-  tickId: number;
-  deadline: number;
-  state: WorldState;
 }

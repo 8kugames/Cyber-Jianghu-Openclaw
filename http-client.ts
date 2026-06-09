@@ -145,9 +145,9 @@ export class HttpClient {
 		return this.baseUrl;
 	}
 
-	/** Get current game state (tick_id, deadline_ms) for reconnection sync. */
-	async getGameState(): Promise<{ tick_id: number; deadline_ms: number }> {
-		return this.get<{ tick_id: number; deadline_ms: number }>("/api/v1/tick");
+	/** Get current game state (tick_id) for reconnection sync. */
+	async getGameState(): Promise<{ tick_id: number }> {
+		return this.get<{ tick_id: number }>("/api/v1/tick");
 	}
 }
 

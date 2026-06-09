@@ -104,7 +104,7 @@ mkdir -p ~/cyber-jianghu-agent/config ~/cyber-jianghu-agent/data
 docker run -d \
   --name cyber-jianghu-agent \
   --restart unless-stopped \
-  -p 23340:23340 \
+  -p 127.0.0.1:23340:23340 \
   -v ~/cyber-jianghu-agent/config:/app/config \
   -v ~/cyber-jianghu-agent/data:/app/data \
   -e CYBER_JIANGHU_RUNTIME_MODE=claw \
@@ -121,7 +121,14 @@ docker run -d \
 - **`-v .../data:/app/data`**：映射数据目录，保存 SQLite 数据库和游戏存档
 - **`CYBER_JIANGHU_WS_ALLOW_EXTERNAL=1`**：允许非 localhost 的 WebSocket 连接（Docker 场景必须）
 - **`--restart unless-stopped`**：容器异常退出后自动重启，保证长时间运行
-- **`-p 23340:23340`**：固定端口映射，避免随机分配导致 OpenClaw 无法连接
+- **`-p 127.0.0.1:23340:23340`**：固定端口映射，绑定 localhost 防止公网暴露
+
+> **⚠️ 端口安全警告**
+> - Agent HTTP API 暴露了角色注册、托梦注入等控制接口，且 `agent.yaml` 中存储有 `auth_token`
+> - `-p 23340:23340` 会绑定到 `0.0.0.0`（所有网卡），**若宿主机有公网 IP，控制接口将直接暴露在公网**
+> - **推荐**：使用 `-p 127.0.0.1:23340:23340` 绑定到 localhost（如上所示），仅在本地访问
+> - **全 Docker 部署**：优先使用 Docker 内部网络（`--network`）通信，避免 `-p` 端口映射
+> - **必须公网访问时**：务必在前端添加反向代理（如 Nginx）+ TLS + 身份认证
 
 > **注意**：Dockerfile 默认 CMD 为 `["./agent", "run", "--port", "23340"]`，端口通过 CMD 固定，模式通过环境变量覆盖。无需在 CMD 后追加参数。
 
@@ -338,6 +345,7 @@ docker logs cyber-jianghu-agent
 ls -la ~/.cyber-jianghu/config/ ~/.cyber-jianghu/data/
 
 # 3. 如果配置损坏，删除后重新注册
+# ⚠️ 注意：agent.yaml 中包含 auth_token，删除后需重新注册角色
 rm -rf ~/.cyber-jianghu/config/agent.yaml
 docker restart cyber-jianghu-agent
 ```

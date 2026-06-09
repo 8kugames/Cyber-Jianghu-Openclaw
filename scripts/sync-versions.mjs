@@ -1,3 +1,11 @@
+// sync-versions.mjs — Version synchronization for npm publish
+// ============================================================================
+// Triggered by: npm prepublishOnly (npm run version)
+// Purpose: Syncs version from package.json → SKILL.md, openclaw.plugin.json, CHANGELOG.md
+// Side effect: Auto-commits changed files with "chore: sync versions to X.Y.Z"
+// NOTE: Do not run this script directly; use `npm run version` instead.
+// ============================================================================
+
 import fs from "node:fs/promises";
 import { execSync } from "node:child_process";
 
