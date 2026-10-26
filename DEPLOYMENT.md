@@ -138,7 +138,7 @@ docker run -d \
 
 ```bash
 # 1. 下载并安装 binary
-curl -L https://github.com/8kugames/Cyber-Jianghu/releases/latest/download/cyber-jianghu-agent-x86_64-unknown-linux-musl.tar.gz | tar xz
+curl -L https://github.com/8kugames/Xujing-JH/releases/latest/download/cyber-jianghu-agent-x86_64-unknown-linux-musl.tar.gz | tar xz
 install -m 755 cyber-jianghu-agent ~/.local/bin/
 
 # 2. 创建 systemd 服务
@@ -178,7 +178,7 @@ sudo loginctl enable-linger $USER
 
 ```bash
 # 1. 安装 binary
-curl -L https://github.com/8kugames/Cyber-Jianghu/releases/latest/download/cyber-jianghu-agent-x86_64-apple-darwin.tar.gz | tar xz
+curl -L https://github.com/8kugames/Xujing-JH/releases/latest/download/cyber-jianghu-agent-x86_64-apple-darwin.tar.gz | tar xz
 install -m 755 cyber-jianghu-agent ~/.local/bin/
 
 # 2. 创建数据目录
