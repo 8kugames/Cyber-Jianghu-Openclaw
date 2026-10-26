@@ -1,6 +1,6 @@
 # Cyber-Jianghu Agent 部署指南
 
-本文档说明如何部署 `cyber-jianghu-agent`（以下简称 Agent），使其与 OpenClaw 保持持久连接。
+本文档说明如何部署 `xujing-jh-agent`（以下简称 Agent），使其与 OpenClaw 保持持久连接。
 
 ## 架构概述
 
@@ -138,20 +138,20 @@ docker run -d \
 
 ```bash
 # 1. 下载并安装 binary
-curl -L https://github.com/8kugames/Xujing-JH/releases/latest/download/cyber-jianghu-agent-x86_64-unknown-linux-musl.tar.gz | tar xz
-install -m 755 cyber-jianghu-agent ~/.local/bin/
+curl -L https://github.com/8kugames/Xujing-JH/releases/latest/download/xujing-jh-agent-linux-x86_64 -o xujing-jh-agent
+install -m 755 xujing-jh-agent ~/.local/bin/
 
 # 2. 创建 systemd 服务
 mkdir -p ~/.config/systemd/user
-cat > ~/.config/systemd/user/cyber-jianghu-agent.service << 'EOF'
+cat > ~/.config/systemd/user/xujing-jh-agent.service << 'EOF'
 [Unit]
-Description=Cyber-Jianghu Agent
+Description=Xujing-JH Agent
 After=network.target
 
 [Service]
 Type=simple
 WorkingDirectory=%h/.cyber-jianghu
-ExecStart=%h/.local/bin/cyber-jianghu-agent run --mode claw --port 23340
+ExecStart=%h/.local/bin/xujing-jh-agent run --mode claw --port 23340
 Restart=unless-stopped
 RestartSec=5
 Environment=RUST_LOG=info
@@ -168,7 +168,7 @@ mkdir -p ~/.cyber-jianghu/config ~/.cyber-jianghu/data
 
 # 4. 启用并启动
 systemctl --user daemon-reload
-systemctl --user enable --now cyber-jianghu-agent
+systemctl --user enable --now xujing-jh-agent
 
 # 5. 启用 linger（使服务在登出后继续运行）
 sudo loginctl enable-linger $USER
@@ -178,23 +178,23 @@ sudo loginctl enable-linger $USER
 
 ```bash
 # 1. 安装 binary
-curl -L https://github.com/8kugames/Xujing-JH/releases/latest/download/cyber-jianghu-agent-x86_64-apple-darwin.tar.gz | tar xz
-install -m 755 cyber-jianghu-agent ~/.local/bin/
+curl -L https://github.com/8kugames/Xujing-JH/releases/latest/download/xujing-jh-agent-macos-arm64 -o xujing-jh-agent
+install -m 755 xujing-jh-agent ~/.local/bin/
 
 # 2. 创建数据目录
 mkdir -p ~/.cyber-jianghu/config ~/.cyber-jianghu/data
 
 # 3. 创建 launchd plist
-cat > ~/Library/LaunchAgents/com.8kugames.cyber-jianghu-agent.plist << 'EOF'
+cat > ~/Library/LaunchAgents/com.8kugames.xujing-jh-agent.plist << 'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.8kugames.cyber-jianghu-agent</string>
+    <string>com.8kugames.xujing-jh-agent</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/YOUR_USERNAME/.local/bin/cyber-jianghu-agent</string>
+        <string>/Users/YOUR_USERNAME/.local/bin/xujing-jh-agent</string>
         <string>run</string>
         <string>--mode</string>
         <string>claw</string>
@@ -219,15 +219,15 @@ cat > ~/Library/LaunchAgents/com.8kugames.cyber-jianghu-agent.plist << 'EOF'
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>/Users/YOUR_USERNAME/.cyber-jianghu-agent.log</string>
+    <string>/Users/YOUR_USERNAME/.xujing-jh-agent.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/YOUR_USERNAME/.cyber-jianghu-agent.log</string>
+    <string>/Users/YOUR_USERNAME/.xujing-jh-agent.log</string>
 </dict>
 </plist>
 EOF
 
 # 4. 加载服务
-launchctl load ~/Library/LaunchAgents/com.8kugames.cyber-jianghu-agent.plist
+launchctl load ~/Library/LaunchAgents/com.8kugames.xujing-jh-agent.plist
 ```
 
 ---
@@ -326,7 +326,7 @@ curl -X POST http://localhost:23340/api/v1/character/register \
   -d '{"name": "你的角色名", ...}'
 
 # 3. 重启 Agent
-systemctl --user restart cyber-jianghu-agent
+systemctl --user restart xujing-jh-agent
 # 或 Docker:
 docker restart cyber-jianghu-agent
 ```
@@ -337,7 +337,7 @@ docker restart cyber-jianghu-agent
 
 ```bash
 # 1. 查看日志
-journalctl --user -u cyber-jianghu-agent -n 50
+journalctl --user -u xujing-jh-agent -n 50
 # 或 Docker:
 docker logs cyber-jianghu-agent
 
@@ -357,7 +357,7 @@ docker restart cyber-jianghu-agent
 lsof -i :23340
 
 # 或指定端口范围启动（0 = 自动选择 23340-23349）
-cyber-jianghu-agent run --mode claw --port 0
+xujing-jh-agent run --mode claw --port 0
 # OpenClaw 会自动扫描 23340-23349 找到可用端口
 ```
 
@@ -406,9 +406,9 @@ else
     echo "[$(date)] Agent is unhealthy"
     if [ "$1" = "--repair" ]; then
         echo "[$(date)] Attempting restart..."
-        systemctl --user restart cyber-jianghu-agent 2>/dev/null || \
+        systemctl --user restart xujing-jh-agent 2>/dev/null || \
         docker restart cyber-jianghu-agent 2>/dev/null || \
-        ~/.local/bin/cyber-jianghu-agent run --mode claw --port 23340 &
+        ~/.local/bin/xujing-jh-agent run --mode claw --port 23340 &
         sleep 3
     fi
     exit 1
